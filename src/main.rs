@@ -8,10 +8,14 @@ mod report;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
-#[command(name = "estoppl", version, about = "See what your AI agent is doing. Stop it when it goes wrong.")]
+#[command(
+    name = "estoppl",
+    version,
+    about = "See what your AI agent is doing. Stop it when it goes wrong."
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -159,11 +163,7 @@ fn cmd_init(agent_id: &str) -> Result<()> {
     Ok(())
 }
 
-async fn cmd_start(
-    upstream_cmd: &str,
-    upstream_args: &[String],
-    config_path: &PathBuf,
-) -> Result<()> {
+async fn cmd_start(upstream_cmd: &str, upstream_args: &[String], config_path: &Path) -> Result<()> {
     let config = config::ProxyConfig::load(config_path)?;
     let key_dir = PathBuf::from(".estoppl/keys");
     let key_manager = identity::KeyManager::load_or_generate(&key_dir)?;
@@ -189,7 +189,7 @@ async fn cmd_start(
     .await
 }
 
-fn cmd_report(output: &PathBuf, config_path: &PathBuf) -> Result<()> {
+fn cmd_report(output: &Path, config_path: &Path) -> Result<()> {
     let config = config::ProxyConfig::load(config_path)?;
     let db_ledger = ledger::LocalLedger::open(&config.ledger.db_path)?;
 
@@ -207,7 +207,7 @@ fn cmd_audit(
     tool: Option<String>,
     decision: Option<String>,
     since: Option<String>,
-    config_path: &PathBuf,
+    config_path: &Path,
 ) -> Result<()> {
     let config = config::ProxyConfig::load(config_path)?;
     let db_ledger = ledger::LocalLedger::open(&config.ledger.db_path)?;
@@ -254,15 +254,18 @@ fn cmd_audit(
     Ok(())
 }
 
-async fn cmd_tail(config_path: &PathBuf) -> Result<()> {
+async fn cmd_tail(config_path: &Path) -> Result<()> {
     let config = config::ProxyConfig::load(config_path)?;
     let db_path = config.ledger.db_path;
 
-    println!("Tailing events from {}... (Ctrl+C to stop)", db_path.display());
+    println!(
+        "Tailing events from {}... (Ctrl+C to stop)",
+        db_path.display()
+    );
     println!();
     println!(
-        "{:<10} {:<30} {:<12} {:<22} {}",
-        "EVENT", "TOOL", "DECISION", "TIMESTAMP", "LATENCY"
+        "{:<10} {:<30} {:<12} {:<22} LATENCY",
+        "EVENT", "TOOL", "DECISION", "TIMESTAMP"
     );
     println!("{}", "-".repeat(90));
 
@@ -298,7 +301,7 @@ async fn cmd_tail(config_path: &PathBuf) -> Result<()> {
     }
 }
 
-fn cmd_stats(config_path: &PathBuf) -> Result<()> {
+fn cmd_stats(config_path: &Path) -> Result<()> {
     let config = config::ProxyConfig::load(config_path)?;
     let db_ledger = ledger::LocalLedger::open(&config.ledger.db_path)?;
 
@@ -325,7 +328,8 @@ fn cmd_stats(config_path: &PathBuf) -> Result<()> {
     let latency = db_ledger.latency_percentiles()?;
     println!();
     println!("=== Latency (allowed calls) ===");
-    println!("  p50: {}ms    p90: {}ms    p99: {}ms    max: {}ms",
+    println!(
+        "  p50: {}ms    p90: {}ms    p99: {}ms    max: {}ms",
         latency.p50, latency.p90, latency.p99, latency.max
     );
 
@@ -358,8 +362,8 @@ fn cmd_stats(config_path: &PathBuf) -> Result<()> {
         println!();
         println!("=== Recent Sessions ===");
         println!(
-            "{:<10} {:<20} {:>6} {:<22} {}",
-            "SESSION", "AGENT", "CALLS", "STARTED", "LAST CALL"
+            "{:<10} {:<20} {:>6} {:<22} LAST CALL",
+            "SESSION", "AGENT", "CALLS", "STARTED"
         );
         println!("{}", "-".repeat(80));
         for s in &sessions {
@@ -379,8 +383,8 @@ fn cmd_stats(config_path: &PathBuf) -> Result<()> {
 
 fn print_event_table(events: &[ledger::AgentActionEvent]) {
     println!(
-        "{:<10} {:<30} {:<12} {:<22} {}",
-        "EVENT", "TOOL", "DECISION", "TIMESTAMP", "LATENCY"
+        "{:<10} {:<30} {:<12} {:<22} LATENCY",
+        "EVENT", "TOOL", "DECISION", "TIMESTAMP"
     );
     println!("{}", "-".repeat(90));
 

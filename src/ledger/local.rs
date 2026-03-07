@@ -22,7 +22,7 @@ impl LocalLedger {
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
              PRAGMA synchronous = FULL;
-             PRAGMA foreign_keys = ON;"
+             PRAGMA foreign_keys = ON;",
         )?;
 
         conn.execute_batch(
@@ -50,7 +50,7 @@ impl LocalLedger {
             CREATE INDEX IF NOT EXISTS idx_events_agent_id ON events(agent_id);
             CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
             CREATE INDEX IF NOT EXISTS idx_events_tool_name ON events(tool_name);
-            CREATE INDEX IF NOT EXISTS idx_events_policy_decision ON events(policy_decision);"
+            CREATE INDEX IF NOT EXISTS idx_events_policy_decision ON events(policy_decision);",
         )?;
 
         Ok(Self { conn })
@@ -90,16 +90,23 @@ impl LocalLedger {
 
     /// Get the hash of the most recent event (for chain linking).
     pub fn last_event_hash(&self) -> Result<String> {
-        let result: Option<String> = self.conn.query_row(
-            "SELECT event_hash FROM events ORDER BY timestamp DESC, rowid DESC LIMIT 1",
-            [],
-            |row| row.get(0),
-        ).optional()?;
+        let result: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT event_hash FROM events ORDER BY timestamp DESC, rowid DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
         Ok(result.unwrap_or_default())
     }
 
     /// Query events with optional filters.
-    pub fn query_events(&self, limit: Option<u32>, agent_id: Option<&str>) -> Result<Vec<AgentActionEvent>> {
+    pub fn query_events(
+        &self,
+        limit: Option<u32>,
+        agent_id: Option<&str>,
+    ) -> Result<Vec<AgentActionEvent>> {
         self.query_events_filtered(limit, agent_id, None, None, None)
     }
 
@@ -117,7 +124,7 @@ impl LocalLedger {
                     timestamp, tool_name, tool_server, input_hash, output_hash,
                     policy_decision, policy_rule, latency_ms,
                     prev_hash, event_hash, signature, proxy_key_id
-             FROM events"
+             FROM events",
         );
 
         let mut conditions: Vec<String> = vec![];
@@ -161,9 +168,12 @@ impl LocalLedger {
         }
 
         let mut stmt = self.conn.prepare(&sql)?;
-        let events = stmt.query_map(rusqlite::params_from_iter(params.iter().map(|p| p.as_ref())), |row| {
-            Self::row_to_event(row)
-        })?.collect::<std::result::Result<Vec<_>, _>>()?;
+        let events = stmt
+            .query_map(
+                rusqlite::params_from_iter(params.iter().map(|p| p.as_ref())),
+                Self::row_to_event,
+            )?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
 
         Ok(events)
     }
@@ -175,12 +185,12 @@ impl LocalLedger {
                     timestamp, tool_name, tool_server, input_hash, output_hash,
                     policy_decision, policy_rule, latency_ms,
                     prev_hash, event_hash, signature, proxy_key_id, rowid
-             FROM events WHERE rowid > ?1 ORDER BY rowid ASC"
+             FROM events WHERE rowid > ?1 ORDER BY rowid ASC",
         )?;
 
-        let events: Vec<AgentActionEvent> = stmt.query_map([after_rowid], |row| {
-            Self::row_to_event(row)
-        })?.collect::<std::result::Result<Vec<_>, _>>()?;
+        let events: Vec<AgentActionEvent> = stmt
+            .query_map([after_rowid], Self::row_to_event)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
 
         // Get the current max rowid.
         let new_max: i64 = self.conn.query_row(
@@ -194,11 +204,11 @@ impl LocalLedger {
 
     /// Get the current max rowid (for initializing tail).
     pub fn max_rowid(&self) -> Result<i64> {
-        let rowid: i64 = self.conn.query_row(
-            "SELECT COALESCE(MAX(rowid), 0) FROM events",
-            [],
-            |r| r.get(0),
-        )?;
+        let rowid: i64 =
+            self.conn
+                .query_row("SELECT COALESCE(MAX(rowid), 0) FROM events", [], |r| {
+                    r.get(0)
+                })?;
         Ok(rowid)
     }
 
@@ -215,21 +225,23 @@ impl LocalLedger {
                     MAX(latency_ms) as max_latency
              FROM events
              GROUP BY tool_name
-             ORDER BY call_count DESC"
+             ORDER BY call_count DESC",
         )?;
 
-        let stats = stmt.query_map([], |row| {
-            Ok(ToolStats {
-                tool_name: row.get(0)?,
-                call_count: row.get(1)?,
-                allowed: row.get(2)?,
-                blocked: row.get(3)?,
-                human_required: row.get(4)?,
-                avg_latency_ms: row.get(5)?,
-                min_latency_ms: row.get(6)?,
-                max_latency_ms: row.get(7)?,
-            })
-        })?.collect::<std::result::Result<Vec<_>, _>>()?;
+        let stats = stmt
+            .query_map([], |row| {
+                Ok(ToolStats {
+                    tool_name: row.get(0)?,
+                    call_count: row.get(1)?,
+                    allowed: row.get(2)?,
+                    blocked: row.get(3)?,
+                    human_required: row.get(4)?,
+                    avg_latency_ms: row.get(5)?,
+                    min_latency_ms: row.get(6)?,
+                    max_latency_ms: row.get(7)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
 
         Ok(stats)
     }
@@ -237,9 +249,10 @@ impl LocalLedger {
     /// Get latency percentiles across all events.
     pub fn latency_percentiles(&self) -> Result<LatencyStats> {
         let mut stmt = self.conn.prepare(
-            "SELECT latency_ms FROM events WHERE policy_decision = 'ALLOW' ORDER BY latency_ms ASC"
+            "SELECT latency_ms FROM events WHERE policy_decision = 'ALLOW' ORDER BY latency_ms ASC",
         )?;
-        let latencies: Vec<i64> = stmt.query_map([], |row| row.get(0))?
+        let latencies: Vec<i64> = stmt
+            .query_map([], |row| row.get(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
 
         if latencies.is_empty() {
@@ -274,18 +287,20 @@ impl LocalLedger {
              FROM events
              GROUP BY session_id
              ORDER BY first_call DESC
-             LIMIT 20"
+             LIMIT 20",
         )?;
 
-        let stats = stmt.query_map([], |row| {
-            Ok(SessionStats {
-                session_id: row.get(0)?,
-                agent_id: row.get(1)?,
-                call_count: row.get(2)?,
-                first_call: row.get(3)?,
-                last_call: row.get(4)?,
-            })
-        })?.collect::<std::result::Result<Vec<_>, _>>()?;
+        let stats = stmt
+            .query_map([], |row| {
+                Ok(SessionStats {
+                    session_id: row.get(0)?,
+                    agent_id: row.get(1)?,
+                    call_count: row.get(2)?,
+                    first_call: row.get(3)?,
+                    last_call: row.get(4)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
 
         Ok(stats)
     }
@@ -346,32 +361,46 @@ impl LocalLedger {
 
     /// Get summary statistics for the report.
     pub fn summary_stats(&self) -> Result<ReportStats> {
-        let total: u64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM events", [], |r| r.get(0)
-        )?;
+        let total: u64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM events", [], |r| r.get(0))?;
         let blocked: u64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM events WHERE policy_decision = 'BLOCK'", [], |r| r.get(0)
+            "SELECT COUNT(*) FROM events WHERE policy_decision = 'BLOCK'",
+            [],
+            |r| r.get(0),
         )?;
         let human_required: u64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM events WHERE policy_decision = 'HUMAN_REQUIRED'", [], |r| r.get(0)
+            "SELECT COUNT(*) FROM events WHERE policy_decision = 'HUMAN_REQUIRED'",
+            [],
+            |r| r.get(0),
         )?;
         let allowed: u64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM events WHERE policy_decision = 'ALLOW'", [], |r| r.get(0)
+            "SELECT COUNT(*) FROM events WHERE policy_decision = 'ALLOW'",
+            [],
+            |r| r.get(0),
         )?;
 
-        let unique_tools: u64 = self.conn.query_row(
-            "SELECT COUNT(DISTINCT tool_name) FROM events", [], |r| r.get(0)
-        )?;
-        let unique_agents: u64 = self.conn.query_row(
-            "SELECT COUNT(DISTINCT agent_id) FROM events", [], |r| r.get(0)
-        )?;
+        let unique_tools: u64 =
+            self.conn
+                .query_row("SELECT COUNT(DISTINCT tool_name) FROM events", [], |r| {
+                    r.get(0)
+                })?;
+        let unique_agents: u64 =
+            self.conn
+                .query_row("SELECT COUNT(DISTINCT agent_id) FROM events", [], |r| {
+                    r.get(0)
+                })?;
 
-        let first_event: Option<String> = self.conn.query_row(
-            "SELECT MIN(timestamp) FROM events", [], |r| r.get(0)
-        ).optional()?.flatten();
-        let last_event: Option<String> = self.conn.query_row(
-            "SELECT MAX(timestamp) FROM events", [], |r| r.get(0)
-        ).optional()?.flatten();
+        let first_event: Option<String> = self
+            .conn
+            .query_row("SELECT MIN(timestamp) FROM events", [], |r| r.get(0))
+            .optional()?
+            .flatten();
+        let last_event: Option<String> = self
+            .conn
+            .query_row("SELECT MAX(timestamp) FROM events", [], |r| r.get(0))
+            .optional()?
+            .flatten();
 
         Ok(ReportStats {
             total_events: total,
@@ -578,7 +607,9 @@ mod tests {
         let e2 = make_signed_event("evt-2", "plaid.auth", "ALLOW", &e1.event_hash);
         ledger.append(&e2).unwrap();
 
-        let filtered = ledger.query_events_filtered(None, None, Some("stripe.pay"), None, None).unwrap();
+        let filtered = ledger
+            .query_events_filtered(None, None, Some("stripe.pay"), None, None)
+            .unwrap();
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].tool_name, "stripe.pay");
     }
@@ -594,11 +625,15 @@ mod tests {
         let e3 = make_signed_event("evt-3", "tool_c", "ALLOW", &e2.event_hash);
         ledger.append(&e3).unwrap();
 
-        let blocked = ledger.query_events_filtered(None, None, None, Some("BLOCK"), None).unwrap();
+        let blocked = ledger
+            .query_events_filtered(None, None, None, Some("BLOCK"), None)
+            .unwrap();
         assert_eq!(blocked.len(), 1);
         assert_eq!(blocked[0].event_id, "evt-2");
 
-        let allowed = ledger.query_events_filtered(None, None, None, Some("allow"), None).unwrap();
+        let allowed = ledger
+            .query_events_filtered(None, None, None, Some("allow"), None)
+            .unwrap();
         assert_eq!(allowed.len(), 2);
     }
 

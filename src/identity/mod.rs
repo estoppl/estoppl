@@ -16,18 +16,15 @@ impl KeyManager {
         let public_path = key_dir.join("estoppl-signing.pub");
 
         let signing_key = if private_path.exists() {
-            let bytes = std::fs::read(&private_path)
-                .context("Failed to read signing key")?;
+            let bytes = std::fs::read(&private_path).context("Failed to read signing key")?;
             let key_bytes: [u8; 32] = bytes
                 .try_into()
                 .map_err(|_| anyhow::anyhow!("Invalid key file: expected 32 bytes"))?;
             SigningKey::from_bytes(&key_bytes)
         } else {
             let key = SigningKey::generate(&mut OsRng);
-            std::fs::create_dir_all(key_dir)
-                .context("Failed to create key directory")?;
-            std::fs::write(&private_path, key.to_bytes())
-                .context("Failed to write signing key")?;
+            std::fs::create_dir_all(key_dir).context("Failed to create key directory")?;
+            std::fs::write(&private_path, key.to_bytes()).context("Failed to write signing key")?;
             std::fs::write(&public_path, key.verifying_key().to_bytes())
                 .context("Failed to write public key")?;
 
@@ -52,7 +49,10 @@ impl KeyManager {
     /// Sign arbitrary bytes, returning the base64-encoded signature.
     pub fn sign(&self, data: &[u8]) -> String {
         let signature = self.signing_key.sign(data);
-        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, signature.to_bytes())
+        base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            signature.to_bytes(),
+        )
     }
 
     /// Return the public verifying key (used for signature verification).
@@ -91,13 +91,10 @@ mod tests {
         let sig_b64 = km.sign(data);
 
         // Decode signature and verify.
-        let sig_bytes = base64::Engine::decode(
-            &base64::engine::general_purpose::STANDARD,
-            &sig_b64,
-        ).unwrap();
-        let signature = ed25519_dalek::Signature::from_bytes(
-            sig_bytes.as_slice().try_into().unwrap(),
-        );
+        let sig_bytes =
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &sig_b64).unwrap();
+        let signature =
+            ed25519_dalek::Signature::from_bytes(sig_bytes.as_slice().try_into().unwrap());
 
         km.verifying_key().verify(data, &signature).unwrap();
     }

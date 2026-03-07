@@ -6,7 +6,7 @@ use tokio::process::Command;
 use uuid::Uuid;
 
 use crate::identity::KeyManager;
-use crate::ledger::{sha256_hex, AgentActionEvent, LocalLedger};
+use crate::ledger::{AgentActionEvent, LocalLedger, sha256_hex};
 use crate::mcp::{JsonRpcRequest, JsonRpcResponse, ToolCallParams};
 use crate::policy::{PolicyDecision, PolicyEngine};
 
@@ -24,6 +24,7 @@ struct PendingCall {
 ///
 /// The agent host writes JSON-RPC to our stdin, we intercept tools/call requests,
 /// enforce policy, forward allowed calls to the upstream process, and log everything.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_stdio_proxy(
     upstream_cmd: &str,
     upstream_args: &[String],
@@ -50,10 +51,21 @@ pub async fn run_stdio_proxy(
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()
-        .with_context(|| format!("Failed to spawn upstream: {} {:?}", upstream_cmd, upstream_args))?;
+        .with_context(|| {
+            format!(
+                "Failed to spawn upstream: {} {:?}",
+                upstream_cmd, upstream_args
+            )
+        })?;
 
-    let mut child_stdin = child.stdin.take().context("Failed to capture child stdin")?;
-    let child_stdout = child.stdout.take().context("Failed to capture child stdout")?;
+    let mut child_stdin = child
+        .stdin
+        .take()
+        .context("Failed to capture child stdin")?;
+    let child_stdout = child
+        .stdout
+        .take()
+        .context("Failed to capture child stdout")?;
 
     let mut host_stdin = BufReader::new(tokio::io::stdin());
     let mut host_stdout = tokio::io::stdout();
@@ -76,9 +88,10 @@ pub async fn run_stdio_proxy(
                 }
 
                 let trimmed = host_line.trim();
-                if !trimmed.is_empty() {
-                    if let Ok(req) = serde_json::from_str::<JsonRpcRequest>(trimmed) {
-                        if req.is_tool_call() {
+                if !trimmed.is_empty()
+                    && let Ok(req) = serde_json::from_str::<JsonRpcRequest>(trimmed)
+                    && req.is_tool_call()
+                {
                             let tool_params = req.tool_call_params();
                             let tool_name = tool_params.as_ref()
                                 .map(|p| p.name.clone())
@@ -136,8 +149,6 @@ pub async fn run_stdio_proxy(
                                     });
                                 }
                             }
-                        }
-                    }
                 }
 
                 // Forward to upstream (for non-blocked requests and non-tool-call messages).
@@ -155,9 +166,9 @@ pub async fn run_stdio_proxy(
                 }
 
                 let trimmed = upstream_line.trim();
-                if !trimmed.is_empty() {
-                    // Check if this is a response to a pending tools/call.
-                    if let Ok(resp) = serde_json::from_str::<JsonRpcResponse>(trimmed) {
+                if !trimmed.is_empty()
+                    && let Ok(resp) = serde_json::from_str::<JsonRpcResponse>(trimmed)
+                {
                         let resp_id_key = resp.id.as_ref()
                             .map(|v| v.to_string())
                             .unwrap_or_default();
@@ -179,7 +190,6 @@ pub async fn run_stdio_proxy(
                                 "Logged tool call response"
                             );
                         }
-                    }
                 }
 
                 // Forward response to agent host.
@@ -201,6 +211,7 @@ pub async fn run_stdio_proxy(
 }
 
 /// Create, sign, and append an event to the local ledger.
+#[allow(clippy::too_many_arguments)]
 fn log_event(
     ledger: &LocalLedger,
     key_manager: &KeyManager,

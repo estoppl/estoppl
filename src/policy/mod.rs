@@ -98,14 +98,13 @@ impl PolicyEngine {
         }
 
         // Check amount threshold.
-        if let Some(max_amount) = self.rules.max_amount_usd {
-            if let Some(amount) = extract_amount(&tool_call.arguments, &self.rules.amount_field) {
-                if amount > max_amount {
-                    return PolicyDecision::Block {
-                        rule: format!("max_amount_usd:{}>{}", amount, max_amount),
-                    };
-                }
-            }
+        if let Some(max_amount) = self.rules.max_amount_usd
+            && let Some(amount) = extract_amount(&tool_call.arguments, &self.rules.amount_field)
+            && amount > max_amount
+        {
+            return PolicyDecision::Block {
+                rule: format!("max_amount_usd:{}>{}", amount, max_amount),
+            };
         }
 
         // Check rate limits.
@@ -145,8 +144,7 @@ impl PolicyEngine {
 
 /// Match tool name with support for wildcards (e.g. "stripe.*" matches "stripe.create_payment").
 fn tool_matches(tool_name: &str, pattern: &str) -> bool {
-    if pattern.ends_with(".*") {
-        let prefix = &pattern[..pattern.len() - 2];
+    if let Some(prefix) = pattern.strip_suffix(".*") {
         tool_name.starts_with(prefix)
     } else {
         tool_name == pattern

@@ -42,8 +42,16 @@ fn test_init_creates_config_and_keys() {
 
     // Verify files created.
     assert!(dir.path().join("estoppl.toml").exists());
-    assert!(dir.path().join(".estoppl/keys/estoppl-signing.key").exists());
-    assert!(dir.path().join(".estoppl/keys/estoppl-signing.pub").exists());
+    assert!(
+        dir.path()
+            .join(".estoppl/keys/estoppl-signing.key")
+            .exists()
+    );
+    assert!(
+        dir.path()
+            .join(".estoppl/keys/estoppl-signing.pub")
+            .exists()
+    );
     assert!(dir.path().join(".estoppl/events.db").exists());
 
     // Verify config content.
