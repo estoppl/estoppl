@@ -11,7 +11,7 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "estoppl", version, about = "Compliance proxy for AI agent tool calls")]
+#[command(name = "estoppl", version, about = "See what your AI agent is doing. Stop it when it goes wrong.")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -41,7 +41,7 @@ enum Commands {
         config: PathBuf,
     },
 
-    /// Generate a local compliance report (HTML) from logged events.
+    /// Generate a local activity report (HTML) from logged events.
     Report {
         /// Output file path.
         #[arg(long, short, default_value = "estoppl-report.html")]
@@ -62,6 +62,32 @@ enum Commands {
         #[arg(long)]
         verify: bool,
 
+        /// Filter by tool name (exact match or use % for wildcard, e.g. "stripe%").
+        #[arg(long)]
+        tool: Option<String>,
+
+        /// Filter by decision: allow, block, or human_required.
+        #[arg(long)]
+        decision: Option<String>,
+
+        /// Show events since this timestamp (RFC3339, e.g. "2026-03-01T00:00:00Z").
+        #[arg(long)]
+        since: Option<String>,
+
+        /// Path to estoppl config file.
+        #[arg(long, short, default_value = "estoppl.toml")]
+        config: PathBuf,
+    },
+
+    /// Live-stream tool calls as they happen (like tail -f).
+    Tail {
+        /// Path to estoppl config file.
+        #[arg(long, short, default_value = "estoppl.toml")]
+        config: PathBuf,
+    },
+
+    /// Show tool call statistics — volume, latency, per-tool breakdown.
+    Stats {
         /// Path to estoppl config file.
         #[arg(long, short, default_value = "estoppl.toml")]
         config: PathBuf,
@@ -92,8 +118,13 @@ async fn main() -> Result<()> {
         Commands::Audit {
             limit,
             verify,
+            tool,
+            decision,
+            since,
             config,
-        } => cmd_audit(limit, verify, &config)?,
+        } => cmd_audit(limit, verify, tool, decision, since, &config)?,
+        Commands::Tail { config } => cmd_tail(&config).await?,
+        Commands::Stats { config } => cmd_stats(&config)?,
     }
 
     Ok(())
@@ -170,7 +201,14 @@ fn cmd_report(output: &PathBuf, config_path: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn cmd_audit(limit: u32, verify: bool, config_path: &PathBuf) -> Result<()> {
+fn cmd_audit(
+    limit: u32,
+    verify: bool,
+    tool: Option<String>,
+    decision: Option<String>,
+    since: Option<String>,
+    config_path: &PathBuf,
+) -> Result<()> {
     let config = config::ProxyConfig::load(config_path)?;
     let db_ledger = ledger::LocalLedger::open(&config.ledger.db_path)?;
 
@@ -191,29 +229,20 @@ fn cmd_audit(limit: u32, verify: bool, config_path: &PathBuf) -> Result<()> {
         return Ok(());
     }
 
-    let events = db_ledger.query_events(Some(limit), None)?;
+    let events = db_ledger.query_events_filtered(
+        Some(limit),
+        None,
+        tool.as_deref(),
+        decision.as_deref(),
+        since.as_deref(),
+    )?;
 
     if events.is_empty() {
-        println!("No events recorded yet.");
+        println!("No events found.");
         return Ok(());
     }
 
-    println!(
-        "{:<10} {:<30} {:<12} {:<22} {}",
-        "EVENT", "TOOL", "DECISION", "TIMESTAMP", "LATENCY"
-    );
-    println!("{}", "-".repeat(90));
-
-    for e in &events {
-        println!(
-            "{:<10} {:<30} {:<12} {:<22} {}ms",
-            &e.event_id[..8],
-            truncate(&e.tool_name, 28),
-            e.policy_decision,
-            e.timestamp.format("%Y-%m-%d %H:%M:%S"),
-            e.latency_ms,
-        );
-    }
+    print_event_table(&events);
 
     let stats = db_ledger.summary_stats()?;
     println!();
@@ -223,6 +252,148 @@ fn cmd_audit(limit: u32, verify: bool, config_path: &PathBuf) -> Result<()> {
     );
 
     Ok(())
+}
+
+async fn cmd_tail(config_path: &PathBuf) -> Result<()> {
+    let config = config::ProxyConfig::load(config_path)?;
+    let db_path = config.ledger.db_path;
+
+    println!("Tailing events from {}... (Ctrl+C to stop)", db_path.display());
+    println!();
+    println!(
+        "{:<10} {:<30} {:<12} {:<22} {}",
+        "EVENT", "TOOL", "DECISION", "TIMESTAMP", "LATENCY"
+    );
+    println!("{}", "-".repeat(90));
+
+    // Start from the current end so we only show new events.
+    let ledger = ledger::LocalLedger::open(&db_path)?;
+    let mut last_rowid = ledger.max_rowid()?;
+    drop(ledger);
+
+    loop {
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+        // Reopen the connection each poll to see WAL commits from the proxy process.
+        let ledger = ledger::LocalLedger::open(&db_path)?;
+        let (events, new_rowid) = ledger.events_after_rowid(last_rowid)?;
+
+        for e in &events {
+            let decision_colored = match e.policy_decision.as_str() {
+                "BLOCK" => format!("\x1b[31m{}\x1b[0m", e.policy_decision),
+                "HUMAN_REQUIRED" => format!("\x1b[33m{}\x1b[0m", e.policy_decision),
+                _ => e.policy_decision.clone(),
+            };
+            println!(
+                "{:<10} {:<30} {:<21} {:<22} {}ms",
+                &e.event_id[..8],
+                truncate(&e.tool_name, 28),
+                decision_colored,
+                e.timestamp.format("%Y-%m-%d %H:%M:%S"),
+                e.latency_ms,
+            );
+        }
+
+        last_rowid = new_rowid;
+    }
+}
+
+fn cmd_stats(config_path: &PathBuf) -> Result<()> {
+    let config = config::ProxyConfig::load(config_path)?;
+    let db_ledger = ledger::LocalLedger::open(&config.ledger.db_path)?;
+
+    let summary = db_ledger.summary_stats()?;
+
+    if summary.total_events == 0 {
+        println!("No events recorded yet.");
+        return Ok(());
+    }
+
+    // Overall summary.
+    println!("=== Overview ===");
+    println!("Total events:    {}", summary.total_events);
+    println!("  Allowed:       {}", summary.allowed);
+    println!("  Blocked:       {}", summary.blocked);
+    println!("  Human Review:  {}", summary.human_required);
+    println!("Unique tools:    {}", summary.unique_tools);
+    println!("Unique agents:   {}", summary.unique_agents);
+    if let (Some(first), Some(last)) = (&summary.first_event, &summary.last_event) {
+        println!("Time range:      {} → {}", first, last);
+    }
+
+    // Latency percentiles.
+    let latency = db_ledger.latency_percentiles()?;
+    println!();
+    println!("=== Latency (allowed calls) ===");
+    println!("  p50: {}ms    p90: {}ms    p99: {}ms    max: {}ms",
+        latency.p50, latency.p90, latency.p99, latency.max
+    );
+
+    // Per-tool breakdown.
+    let tool_stats = db_ledger.tool_stats()?;
+    if !tool_stats.is_empty() {
+        println!();
+        println!("=== Per-Tool Breakdown ===");
+        println!(
+            "{:<30} {:>6} {:>8} {:>8} {:>8} {:>10}",
+            "TOOL", "CALLS", "ALLOW", "BLOCK", "HUMAN", "AVG(ms)"
+        );
+        println!("{}", "-".repeat(80));
+        for ts in &tool_stats {
+            println!(
+                "{:<30} {:>6} {:>8} {:>8} {:>8} {:>10.1}",
+                truncate(&ts.tool_name, 28),
+                ts.call_count,
+                ts.allowed,
+                ts.blocked,
+                ts.human_required,
+                ts.avg_latency_ms,
+            );
+        }
+    }
+
+    // Recent sessions.
+    let sessions = db_ledger.session_stats()?;
+    if !sessions.is_empty() {
+        println!();
+        println!("=== Recent Sessions ===");
+        println!(
+            "{:<10} {:<20} {:>6} {:<22} {}",
+            "SESSION", "AGENT", "CALLS", "STARTED", "LAST CALL"
+        );
+        println!("{}", "-".repeat(80));
+        for s in &sessions {
+            println!(
+                "{:<10} {:<20} {:>6} {:<22} {}",
+                &s.session_id[..8],
+                truncate(&s.agent_id, 18),
+                s.call_count,
+                &s.first_call[..19],
+                &s.last_call[..19],
+            );
+        }
+    }
+
+    Ok(())
+}
+
+fn print_event_table(events: &[ledger::AgentActionEvent]) {
+    println!(
+        "{:<10} {:<30} {:<12} {:<22} {}",
+        "EVENT", "TOOL", "DECISION", "TIMESTAMP", "LATENCY"
+    );
+    println!("{}", "-".repeat(90));
+
+    for e in events {
+        println!(
+            "{:<10} {:<30} {:<12} {:<22} {}ms",
+            &e.event_id[..8],
+            truncate(&e.tool_name, 28),
+            e.policy_decision,
+            e.timestamp.format("%Y-%m-%d %H:%M:%S"),
+            e.latency_ms,
+        );
+    }
 }
 
 fn truncate(s: &str, max: usize) -> String {
