@@ -69,3 +69,73 @@ impl JsonRpcResponse {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_tools_call_request() {
+        let json = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"stripe.create_payment","arguments":{"amount":100}}}"#;
+        let req: JsonRpcRequest = serde_json::from_str(json).unwrap();
+        assert!(req.is_tool_call());
+        let params = req.tool_call_params().unwrap();
+        assert_eq!(params.name, "stripe.create_payment");
+        assert_eq!(params.arguments["amount"], 100);
+    }
+
+    #[test]
+    fn parse_non_tool_call() {
+        let json = r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#;
+        let req: JsonRpcRequest = serde_json::from_str(json).unwrap();
+        assert!(!req.is_tool_call());
+        assert!(req.tool_call_params().is_none());
+    }
+
+    #[test]
+    fn parse_notification_no_id() {
+        let json = r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#;
+        let req: JsonRpcRequest = serde_json::from_str(json).unwrap();
+        assert!(req.id.is_none());
+        assert!(!req.is_tool_call());
+    }
+
+    #[test]
+    fn parse_success_response() {
+        let json = r#"{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"ok"}]}}"#;
+        let resp: JsonRpcResponse = serde_json::from_str(json).unwrap();
+        assert!(resp.result.is_some());
+        assert!(resp.error.is_none());
+    }
+
+    #[test]
+    fn parse_error_response() {
+        let json = r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32001,"message":"blocked"}}"#;
+        let resp: JsonRpcResponse = serde_json::from_str(json).unwrap();
+        assert!(resp.result.is_none());
+        let err = resp.error.unwrap();
+        assert_eq!(err.code, -32001);
+        assert_eq!(err.message, "blocked");
+    }
+
+    #[test]
+    fn error_response_serializes_correctly() {
+        let resp = JsonRpcResponse::error(
+            Some(serde_json::json!(42)),
+            -32001,
+            "Blocked by policy".to_string(),
+        );
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("-32001"));
+        assert!(json.contains("Blocked by policy"));
+        assert!(json.contains("42"));
+    }
+
+    #[test]
+    fn tools_call_with_string_id() {
+        let json = r#"{"jsonrpc":"2.0","id":"abc-123","method":"tools/call","params":{"name":"read_file","arguments":{"path":"/tmp"}}}"#;
+        let req: JsonRpcRequest = serde_json::from_str(json).unwrap();
+        assert!(req.is_tool_call());
+        assert_eq!(req.id, Some(serde_json::json!("abc-123")));
+    }
+}

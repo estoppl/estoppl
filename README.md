@@ -94,6 +94,14 @@ max_amount_usd = 50000.0
 # Where to find the amount in tool arguments (supports dot notation)
 amount_field = "amount"
 
+# Max calls per tool per minute (0 = unlimited). Prevents runaway agents.
+# rate_limit_per_minute = 30
+
+# Per-tool rate limit overrides
+# [rules.rate_limit_tools]
+# "stripe.create_payment" = 5
+# "execute_trade" = 10
+
 [ledger]
 db_path = ".estoppl/events.db"
 ```
@@ -105,6 +113,8 @@ db_path = ".estoppl/events.db"
 **Human review** — tool calls go through but are flagged as `HUMAN_REQUIRED` in the audit log. Use this for sensitive operations you want visibility into.
 
 **Amount thresholds** — tool calls with an amount field exceeding the limit are blocked automatically. Catches runaway agents before they do damage.
+
+**Rate limiting** — cap how many times any tool (or a specific tool) can be called per minute. If an agent enters a loop calling Stripe 200 times, it gets cut off after the limit. Configure globally with `rate_limit_per_minute` or per-tool with `rate_limit_tools`.
 
 ## Audit log
 
@@ -149,25 +159,27 @@ src/
 
 ## Roadmap
 
-### Current (v0.1)
+### Current (v0.2)
 - [x] stdio proxy mode (transparent MCP interception)
 - [x] Guardrails: tool block/allow lists, amount thresholds, human review flags
 - [x] Ed25519 event signing
 - [x] Hash-chained local SQLite audit log
-- [x] CLI: `init`, `start`, `audit`, `report`
+- [x] CLI: `init`, `start`, `audit`, `report`, `tail`, `stats`
 - [x] HTML activity report
+- [x] `estoppl tail` — live-stream tool calls in your terminal as they happen
+- [x] Rate limiting / circuit breaker — block tools called more than N times per minute
+- [x] `estoppl stats` — tool call volume, latency percentiles, per-tool and per-session breakdown
+- [x] Audit filters — `--tool`, `--decision`, `--since`
+- [x] CI + prebuilt binaries (macOS, Linux) via GitHub Releases
 
-### Next (v0.2)
-- [ ] `estoppl tail` — live-stream tool calls in your terminal as they happen
-- [ ] Rate limiting / circuit breaker — block tools called more than N times per minute
-- [ ] Session stats — tool call volume, latency percentiles, cost awareness
-- [ ] Richer audit filters — by tool name, time range, decision type
-- [ ] CI + prebuilt binaries via GitHub Releases
-- [ ] Homebrew, npm, and pip distribution (no Rust toolchain required)
-
-### Future
+### Next (v0.3)
+- [ ] Homebrew tap (`brew install estoppl`)
+- [ ] npm wrapper package (`npx estoppl` — binary distribution, no Rust required)
+- [ ] pip wrapper package (`pip install estoppl`)
 - [ ] HTTP/SSE reverse proxy mode (for remote MCP servers)
 - [ ] OPA (Open Policy Agent) integration for enterprise policy management
+
+### Future
 - [ ] Python and TypeScript SDKs
 - [ ] Cloud ledger with immutable WORM storage for regulated industries
 - [ ] Compliance evidence packs for SEC, FINRA, and EU AI Act

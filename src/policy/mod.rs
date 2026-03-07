@@ -1,3 +1,7 @@
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::Instant;
+
 use crate::config::RulesConfig;
 use crate::mcp::ToolCallParams;
 
@@ -27,51 +31,120 @@ impl PolicyDecision {
     }
 }
 
-/// Simple rules-based policy engine. Evaluates tool calls against config rules.
+/// Tracks call timestamps per tool for rate limiting.
+struct RateTracker {
+    /// tool_name -> list of call timestamps within the current window
+    calls: HashMap<String, Vec<Instant>>,
+}
+
+impl RateTracker {
+    fn new() -> Self {
+        Self {
+            calls: HashMap::new(),
+        }
+    }
+
+    /// Record a call and return the count within the last 60 seconds.
+    fn record_and_count(&mut self, tool_name: &str) -> u32 {
+        let now = Instant::now();
+        let window = std::time::Duration::from_secs(60);
+
+        let timestamps = self.calls.entry(tool_name.to_string()).or_default();
+        // Prune old entries outside the window.
+        timestamps.retain(|t| now.duration_since(*t) < window);
+        timestamps.push(now);
+        timestamps.len() as u32
+    }
+}
+
+/// Rules-based policy engine with rate limiting.
 pub struct PolicyEngine {
     rules: RulesConfig,
+    rate_tracker: Mutex<RateTracker>,
 }
 
 impl PolicyEngine {
     pub fn new(rules: RulesConfig) -> Self {
-        Self { rules }
+        Self {
+            rules,
+            rate_tracker: Mutex::new(RateTracker::new()),
+        }
     }
 
     /// Evaluate a tool call against the configured rules.
     pub fn evaluate(&self, tool_call: &ToolCallParams) -> PolicyDecision {
         // Check explicit block list first.
-        if self.rules.block_tools.iter().any(|t| tool_matches(&tool_call.name, t)) {
+        if self
+            .rules
+            .block_tools
+            .iter()
+            .any(|t| tool_matches(&tool_call.name, t))
+        {
             return PolicyDecision::Block {
                 rule: format!("block_tools:{}", tool_call.name),
             };
         }
 
         // Check human review list.
-        if self.rules.human_review_tools.iter().any(|t| tool_matches(&tool_call.name, t)) {
+        if self
+            .rules
+            .human_review_tools
+            .iter()
+            .any(|t| tool_matches(&tool_call.name, t))
+        {
             return PolicyDecision::HumanRequired {
                 rule: format!("human_review_tools:{}", tool_call.name),
             };
         }
 
         // Check amount threshold.
-        if let Some(max_amount) = self.rules.max_amount_usd {
-            if let Some(amount) = extract_amount(&tool_call.arguments, &self.rules.amount_field) {
-                if amount > max_amount {
-                    return PolicyDecision::Block {
-                        rule: format!("max_amount_usd:{}>{}", amount, max_amount),
-                    };
-                }
-            }
+        if let Some(max_amount) = self.rules.max_amount_usd
+            && let Some(amount) = extract_amount(&tool_call.arguments, &self.rules.amount_field)
+            && amount > max_amount
+        {
+            return PolicyDecision::Block {
+                rule: format!("max_amount_usd:{}>{}", amount, max_amount),
+            };
+        }
+
+        // Check rate limits.
+        if let Some(decision) = self.check_rate_limit(&tool_call.name) {
+            return decision;
         }
 
         PolicyDecision::Allow
+    }
+
+    fn check_rate_limit(&self, tool_name: &str) -> Option<PolicyDecision> {
+        // Determine the applicable limit: tool-specific override > global default.
+        let limit = self
+            .rules
+            .rate_limit_tools
+            .get(tool_name)
+            .copied()
+            .or(self.rules.rate_limit_per_minute);
+
+        let limit = match limit {
+            Some(l) if l > 0 => l,
+            _ => return None,
+        };
+
+        let mut tracker = self.rate_tracker.lock().unwrap();
+        let count = tracker.record_and_count(tool_name);
+
+        if count > limit {
+            Some(PolicyDecision::Block {
+                rule: format!("rate_limit:{}>{}/min", count, limit),
+            })
+        } else {
+            None
+        }
     }
 }
 
 /// Match tool name with support for wildcards (e.g. "stripe.*" matches "stripe.create_payment").
 fn tool_matches(tool_name: &str, pattern: &str) -> bool {
-    if pattern.ends_with(".*") {
-        let prefix = &pattern[..pattern.len() - 2];
+    if let Some(prefix) = pattern.strip_suffix(".*") {
         tool_name.starts_with(prefix)
     } else {
         tool_name == pattern
@@ -99,6 +172,8 @@ mod tests {
             human_review_tools: vec!["wire_transfer".into()],
             max_amount_usd: Some(50_000.0),
             amount_field: "amount".to_string(),
+            rate_limit_per_minute: None,
+            rate_limit_tools: HashMap::new(),
         }
     }
 
@@ -109,9 +184,12 @@ mod tests {
             name: "dangerous_tool".into(),
             arguments: serde_json::json!({}),
         };
-        assert_eq!(engine.evaluate(&call), PolicyDecision::Block {
-            rule: "block_tools:dangerous_tool".into(),
-        });
+        assert_eq!(
+            engine.evaluate(&call),
+            PolicyDecision::Block {
+                rule: "block_tools:dangerous_tool".into(),
+            }
+        );
     }
 
     #[test]
@@ -121,7 +199,10 @@ mod tests {
             name: "stripe.create_payment".into(),
             arguments: serde_json::json!({}),
         };
-        assert!(matches!(engine.evaluate(&call), PolicyDecision::Block { .. }));
+        assert!(matches!(
+            engine.evaluate(&call),
+            PolicyDecision::Block { .. }
+        ));
     }
 
     #[test]
@@ -131,7 +212,10 @@ mod tests {
             name: "wire_transfer".into(),
             arguments: serde_json::json!({}),
         };
-        assert!(matches!(engine.evaluate(&call), PolicyDecision::HumanRequired { .. }));
+        assert!(matches!(
+            engine.evaluate(&call),
+            PolicyDecision::HumanRequired { .. }
+        ));
     }
 
     #[test]
@@ -141,7 +225,10 @@ mod tests {
             name: "send_payment".into(),
             arguments: serde_json::json!({"amount": 75000.0}),
         };
-        assert!(matches!(engine.evaluate(&call), PolicyDecision::Block { .. }));
+        assert!(matches!(
+            engine.evaluate(&call),
+            PolicyDecision::Block { .. }
+        ));
     }
 
     #[test]
@@ -162,5 +249,54 @@ mod tests {
             arguments: serde_json::json!({}),
         };
         assert_eq!(engine.evaluate(&call), PolicyDecision::Allow);
+    }
+
+    #[test]
+    fn test_rate_limit_global() {
+        let mut rules = make_rules();
+        rules.rate_limit_per_minute = Some(3);
+        let engine = PolicyEngine::new(rules);
+
+        let call = ToolCallParams {
+            name: "read_portfolio".into(),
+            arguments: serde_json::json!({}),
+        };
+
+        // First 3 calls should be allowed.
+        assert_eq!(engine.evaluate(&call), PolicyDecision::Allow);
+        assert_eq!(engine.evaluate(&call), PolicyDecision::Allow);
+        assert_eq!(engine.evaluate(&call), PolicyDecision::Allow);
+
+        // 4th call should be blocked.
+        assert!(matches!(
+            engine.evaluate(&call),
+            PolicyDecision::Block { .. }
+        ));
+    }
+
+    #[test]
+    fn test_rate_limit_per_tool() {
+        let mut rules = make_rules();
+        rules.rate_limit_tools.insert("fast_tool".into(), 2);
+        let engine = PolicyEngine::new(rules);
+
+        let fast = ToolCallParams {
+            name: "fast_tool".into(),
+            arguments: serde_json::json!({}),
+        };
+        let other = ToolCallParams {
+            name: "other_tool".into(),
+            arguments: serde_json::json!({}),
+        };
+
+        assert_eq!(engine.evaluate(&fast), PolicyDecision::Allow);
+        assert_eq!(engine.evaluate(&fast), PolicyDecision::Allow);
+        assert!(matches!(
+            engine.evaluate(&fast),
+            PolicyDecision::Block { .. }
+        ));
+
+        // other_tool should still be allowed (no limit on it).
+        assert_eq!(engine.evaluate(&other), PolicyDecision::Allow);
     }
 }

@@ -1,5 +1,5 @@
-use anyhow::Result;
 use crate::ledger::LocalLedger;
+use anyhow::Result;
 
 /// Generate an HTML compliance report from the local ledger.
 pub fn generate_html_report(ledger: &LocalLedger) -> Result<String> {
@@ -10,7 +10,11 @@ pub fn generate_html_report(ledger: &LocalLedger) -> Result<String> {
     } else {
         format!("BROKEN ({} issues)", broken_links.len())
     };
-    let chain_class = if broken_links.is_empty() { "intact" } else { "broken" };
+    let chain_class = if broken_links.is_empty() {
+        "intact"
+    } else {
+        "broken"
+    };
 
     let events = ledger.query_events(Some(100), None)?;
 
@@ -44,10 +48,14 @@ pub fn generate_html_report(ledger: &LocalLedger) -> Result<String> {
     let broken_html = if broken_links.is_empty() {
         String::new()
     } else {
-        let items: String = broken_links.iter()
+        let items: String = broken_links
+            .iter()
             .map(|b| format!("<li>{}</li>", html_escape(b)))
             .collect();
-        format!(r#"<div class="warning"><h3>Chain Integrity Issues</h3><ul>{}</ul></div>"#, items)
+        format!(
+            r#"<div class="warning"><h3>Chain Integrity Issues</h3><ul>{}</ul></div>"#,
+            items
+        )
     };
 
     let report_time = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC");

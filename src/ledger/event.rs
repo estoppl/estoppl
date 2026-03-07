@@ -65,3 +65,72 @@ pub fn sha256_hex(data: &[u8]) -> String {
     hasher.update(data);
     hex::encode(hasher.finalize())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_event(event_id: &str, prev_hash: &str) -> AgentActionEvent {
+        AgentActionEvent {
+            event_id: event_id.to_string(),
+            agent_id: "test-agent".to_string(),
+            agent_version: "0.1.0".to_string(),
+            authorized_by: "tester".to_string(),
+            session_id: "session-1".to_string(),
+            timestamp: Utc::now(),
+            tool_name: "test_tool".to_string(),
+            tool_server: "".to_string(),
+            input_hash: sha256_hex(b"input"),
+            output_hash: sha256_hex(b"output"),
+            policy_decision: "ALLOW".to_string(),
+            policy_rule: "".to_string(),
+            latency_ms: 2,
+            prev_hash: prev_hash.to_string(),
+            event_hash: "".to_string(),
+            signature: "".to_string(),
+            proxy_key_id: "test-key".to_string(),
+        }
+    }
+
+    #[test]
+    fn compute_hash_is_deterministic() {
+        let event = make_event("evt-1", "");
+        let hash1 = event.compute_hash();
+        let hash2 = event.compute_hash();
+        assert_eq!(hash1, hash2);
+        assert_eq!(hash1.len(), 64); // SHA-256 hex = 64 chars
+    }
+
+    #[test]
+    fn different_events_produce_different_hashes() {
+        let e1 = make_event("evt-1", "");
+        let e2 = make_event("evt-2", "");
+        assert_ne!(e1.compute_hash(), e2.compute_hash());
+    }
+
+    #[test]
+    fn hash_changes_when_field_changes() {
+        let e1 = make_event("evt-1", "");
+        let mut e2 = make_event("evt-1", "");
+        e2.tool_name = "different_tool".to_string();
+        assert_ne!(e1.compute_hash(), e2.compute_hash());
+    }
+
+    #[test]
+    fn prev_hash_affects_event_hash() {
+        let e1 = make_event("evt-1", "");
+        let e2 = make_event("evt-1", "abc123");
+        assert_ne!(e1.compute_hash(), e2.compute_hash());
+    }
+
+    #[test]
+    fn sha256_hex_works() {
+        let hash = sha256_hex(b"hello");
+        assert_eq!(hash.len(), 64);
+        // Known SHA-256 of "hello"
+        assert_eq!(
+            hash,
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        );
+    }
+}

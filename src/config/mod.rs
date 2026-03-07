@@ -45,6 +45,12 @@ pub struct RulesConfig {
     /// JSON path to the amount field in tool arguments (e.g. "amount").
     #[serde(default = "default_amount_field")]
     pub amount_field: String,
+    /// Rate limit: max calls per tool per minute. 0 = unlimited.
+    #[serde(default)]
+    pub rate_limit_per_minute: Option<u32>,
+    /// Rate limit overrides for specific tools (e.g. { "stripe.create_payment" = 5 }).
+    #[serde(default)]
+    pub rate_limit_tools: std::collections::HashMap<String, u32>,
 }
 
 fn default_amount_field() -> String {
@@ -100,6 +106,8 @@ impl ProxyConfig {
                 human_review_tools: vec!["wire_transfer".into(), "execute_trade".into()],
                 max_amount_usd: Some(50_000.0),
                 amount_field: "amount".to_string(),
+                rate_limit_per_minute: None,
+                rate_limit_tools: std::collections::HashMap::new(),
             },
             ledger: LedgerConfig::default(),
         }
