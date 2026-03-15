@@ -30,7 +30,7 @@ enum Commands {
         agent_id: String,
     },
 
-    /// Start the stdio proxy — intercepts MCP tool calls between agent and upstream server.
+    /// Start the stdio proxy — intercepts MCP tool calls between agent and upstream server process.
     Start {
         /// Command to launch the upstream MCP server.
         #[arg(long)]
@@ -39,6 +39,21 @@ enum Commands {
         /// Arguments to pass to the upstream command.
         #[arg(long, num_args = 0..)]
         upstream_args: Vec<String>,
+
+        /// Path to estoppl config file.
+        #[arg(long, short, default_value = "estoppl.toml")]
+        config: PathBuf,
+    },
+
+    /// Start the HTTP proxy — intercepts MCP tool calls over HTTP/SSE (Streamable HTTP transport).
+    StartHttp {
+        /// URL of the upstream MCP server (e.g. "http://localhost:3000/mcp").
+        #[arg(long)]
+        upstream_url: String,
+
+        /// Address to listen on (e.g. "127.0.0.1:4100").
+        #[arg(long, default_value = "127.0.0.1:4100")]
+        listen: String,
 
         /// Path to estoppl config file.
         #[arg(long, short, default_value = "estoppl.toml")]
@@ -118,6 +133,11 @@ async fn main() -> Result<()> {
             upstream_args,
             config,
         } => cmd_start(&upstream_cmd, &upstream_args, &config).await?,
+        Commands::StartHttp {
+            upstream_url,
+            listen,
+            config,
+        } => cmd_start_http(&upstream_url, &listen, &config).await?,
         Commands::Report { output, config } => cmd_report(&output, &config)?,
         Commands::Audit {
             limit,
@@ -159,7 +179,8 @@ fn cmd_init(agent_id: &str) -> Result<()> {
 
     println!();
     println!("Ready. Start the proxy with:");
-    println!("  estoppl start --upstream-cmd <your-mcp-server-command>");
+    println!("  estoppl start --upstream-cmd <your-mcp-server-command>        (stdio mode)");
+    println!("  estoppl start-http --upstream-url <http://host:port/mcp>      (HTTP mode)");
     Ok(())
 }
 
@@ -185,6 +206,34 @@ async fn cmd_start(upstream_cmd: &str, upstream_args: &[String], config_path: &P
         &key_manager,
         &db_ledger,
         &policy_engine,
+    )
+    .await
+}
+
+async fn cmd_start_http(upstream_url: &str, listen_addr: &str, config_path: &Path) -> Result<()> {
+    let config = config::ProxyConfig::load(config_path)?;
+    let key_dir = PathBuf::from(".estoppl/keys");
+    let key_manager = identity::KeyManager::load_or_generate(&key_dir)?;
+    let db_ledger = ledger::LocalLedger::open(&config.ledger.db_path)?;
+    let policy_engine = policy::PolicyEngine::new(config.rules.clone());
+
+    tracing::info!(
+        agent_id = config.agent.id,
+        key_id = key_manager.key_id,
+        listen = listen_addr,
+        upstream = upstream_url,
+        "Estoppl HTTP proxy starting"
+    );
+
+    proxy::run_http_proxy(
+        listen_addr,
+        upstream_url,
+        &config.agent.id,
+        &config.agent.version,
+        config.agent.authorized_by.as_deref().unwrap_or("unknown"),
+        key_manager,
+        db_ledger,
+        policy_engine,
     )
     .await
 }

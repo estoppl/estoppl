@@ -6,7 +6,7 @@ use tokio::process::Command;
 use uuid::Uuid;
 
 use crate::identity::KeyManager;
-use crate::ledger::{AgentActionEvent, LocalLedger, sha256_hex};
+use crate::ledger::{LocalLedger, sha256_hex};
 use crate::mcp::{JsonRpcRequest, JsonRpcResponse, ToolCallParams};
 use crate::policy::{PolicyDecision, PolicyEngine};
 
@@ -92,63 +92,78 @@ pub async fn run_stdio_proxy(
                     && let Ok(req) = serde_json::from_str::<JsonRpcRequest>(trimmed)
                     && req.is_tool_call()
                 {
-                            let tool_params = req.tool_call_params();
-                            let tool_name = tool_params.as_ref()
-                                .map(|p| p.name.clone())
-                                .unwrap_or_else(|| "unknown".to_string());
-                            let input_hash = sha256_hex(trimmed.as_bytes());
+                    let tool_params = req.tool_call_params();
+                    let tool_name = tool_params
+                        .as_ref()
+                        .map(|p| p.name.clone())
+                        .unwrap_or_else(|| "unknown".to_string());
+                    let input_hash = sha256_hex(trimmed.as_bytes());
 
-                            // Evaluate policy.
-                            let decision = tool_params.as_ref()
-                                .map(|p| policy.evaluate(p))
-                                .unwrap_or(PolicyDecision::Allow);
+                    // Evaluate policy.
+                    let decision = tool_params
+                        .as_ref()
+                        .map(|p| policy.evaluate(p))
+                        .unwrap_or(PolicyDecision::Allow);
 
-                            let req_id_key = req.id.as_ref()
-                                .map(|v| v.to_string())
-                                .unwrap_or_default();
+                    let req_id_key = req
+                        .id
+                        .as_ref()
+                        .map(|v| v.to_string())
+                        .unwrap_or_default();
 
-                            tracing::info!(
-                                tool = tool_name,
-                                decision = decision.as_str(),
-                                "Intercepted tools/call"
+                    tracing::info!(
+                        tool = tool_name,
+                        decision = decision.as_str(),
+                        "Intercepted tools/call"
+                    );
+
+                    match &decision {
+                        PolicyDecision::Block { rule } => {
+                            // Don't forward to upstream. Send error response to host.
+                            let err_resp = JsonRpcResponse::error(
+                                req.id.clone(),
+                                -32001,
+                                format!("Blocked by policy: {}", rule),
                             );
+                            let err_json = serde_json::to_string(&err_resp)?;
 
-                            match &decision {
-                                PolicyDecision::Block { rule } => {
-                                    // Don't forward to upstream. Send error response to host.
-                                    let err_resp = JsonRpcResponse::error(
-                                        req.id.clone(),
-                                        -32001,
-                                        format!("Blocked by policy: {}", rule),
-                                    );
-                                    let err_json = serde_json::to_string(&err_resp)?;
+                            // Log the blocked call.
+                            super::log_event(
+                                ledger,
+                                key_manager,
+                                &session_id,
+                                agent_id,
+                                agent_version,
+                                authorized_by,
+                                &tool_name,
+                                "stdio",
+                                &input_hash,
+                                "",
+                                &decision,
+                                0,
+                            )?;
 
-                                    // Log the blocked call.
-                                    log_event(
-                                        ledger, key_manager, &session_id,
-                                        agent_id, agent_version, authorized_by,
-                                        &tool_name, &input_hash, "",
-                                        &decision, 0,
-                                    )?;
+                            host_stdout.write_all(err_json.as_bytes()).await?;
+                            host_stdout.write_all(b"\n").await?;
+                            host_stdout.flush().await?;
 
-                                    host_stdout.write_all(err_json.as_bytes()).await?;
-                                    host_stdout.write_all(b"\n").await?;
-                                    host_stdout.flush().await?;
-
-                                    host_line.clear();
-                                    continue;
-                                }
-                                _ => {
-                                    // ALLOW or HUMAN_REQUIRED — forward to upstream, track it.
-                                    pending.insert(req_id_key, PendingCall {
-                                        tool_name,
-                                        tool_params,
-                                        input_hash,
-                                        start: std::time::Instant::now(),
-                                        decision: decision.clone(),
-                                    });
-                                }
-                            }
+                            host_line.clear();
+                            continue;
+                        }
+                        _ => {
+                            // ALLOW or HUMAN_REQUIRED — forward to upstream, track it.
+                            pending.insert(
+                                req_id_key,
+                                PendingCall {
+                                    tool_name,
+                                    tool_params,
+                                    input_hash,
+                                    start: std::time::Instant::now(),
+                                    decision: decision.clone(),
+                                },
+                            );
+                        }
+                    }
                 }
 
                 // Forward to upstream (for non-blocked requests and non-tool-call messages).
@@ -169,27 +184,37 @@ pub async fn run_stdio_proxy(
                 if !trimmed.is_empty()
                     && let Ok(resp) = serde_json::from_str::<JsonRpcResponse>(trimmed)
                 {
-                        let resp_id_key = resp.id.as_ref()
-                            .map(|v| v.to_string())
-                            .unwrap_or_default();
+                    let resp_id_key = resp
+                        .id
+                        .as_ref()
+                        .map(|v| v.to_string())
+                        .unwrap_or_default();
 
-                        if let Some(call) = pending.remove(&resp_id_key) {
-                            let output_hash = sha256_hex(trimmed.as_bytes());
-                            let latency_ms = call.start.elapsed().as_millis() as i64;
+                    if let Some(call) = pending.remove(&resp_id_key) {
+                        let output_hash = sha256_hex(trimmed.as_bytes());
+                        let latency_ms = call.start.elapsed().as_millis() as i64;
 
-                            log_event(
-                                ledger, key_manager, &session_id,
-                                agent_id, agent_version, authorized_by,
-                                &call.tool_name, &call.input_hash, &output_hash,
-                                &call.decision, latency_ms,
-                            )?;
+                        super::log_event(
+                            ledger,
+                            key_manager,
+                            &session_id,
+                            agent_id,
+                            agent_version,
+                            authorized_by,
+                            &call.tool_name,
+                            "stdio",
+                            &call.input_hash,
+                            &output_hash,
+                            &call.decision,
+                            latency_ms,
+                        )?;
 
-                            tracing::info!(
-                                tool = call.tool_name,
-                                latency_ms = latency_ms,
-                                "Logged tool call response"
-                            );
-                        }
+                        tracing::info!(
+                            tool = call.tool_name,
+                            latency_ms = latency_ms,
+                            "Logged tool call response"
+                        );
+                    }
                 }
 
                 // Forward response to agent host.
@@ -207,50 +232,5 @@ pub async fn run_stdio_proxy(
         }
     }
 
-    Ok(())
-}
-
-/// Create, sign, and append an event to the local ledger.
-#[allow(clippy::too_many_arguments)]
-fn log_event(
-    ledger: &LocalLedger,
-    key_manager: &KeyManager,
-    session_id: &str,
-    agent_id: &str,
-    agent_version: &str,
-    authorized_by: &str,
-    tool_name: &str,
-    input_hash: &str,
-    output_hash: &str,
-    decision: &PolicyDecision,
-    latency_ms: i64,
-) -> Result<()> {
-    let prev_hash = ledger.last_event_hash()?;
-
-    let mut event = AgentActionEvent {
-        event_id: Uuid::now_v7().to_string(),
-        agent_id: agent_id.to_string(),
-        agent_version: agent_version.to_string(),
-        authorized_by: authorized_by.to_string(),
-        session_id: session_id.to_string(),
-        timestamp: chrono::Utc::now(),
-        tool_name: tool_name.to_string(),
-        tool_server: String::new(),
-        input_hash: input_hash.to_string(),
-        output_hash: output_hash.to_string(),
-        policy_decision: decision.as_str().to_string(),
-        policy_rule: decision.rule_name().to_string(),
-        latency_ms,
-        prev_hash,
-        event_hash: String::new(),
-        signature: String::new(),
-        proxy_key_id: key_manager.key_id.clone(),
-    };
-
-    // Compute hash and sign.
-    event.event_hash = event.compute_hash();
-    event.signature = key_manager.sign(event.event_hash.as_bytes());
-
-    ledger.append(&event)?;
     Ok(())
 }

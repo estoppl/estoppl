@@ -12,11 +12,12 @@ This is the OSS layer of a two-layer architecture:
 
 - **Language**: Rust (tokio async runtime)
 - **Binary name**: `estoppl` (crate name is `estoppl-proxy`)
-- **Proxy mode**: stdio intercept only (HTTP reverse proxy is a future milestone)
+- **Proxy modes**: stdio intercept + HTTP/SSE reverse proxy (MCP Streamable HTTP transport)
 - **Policy engine**: Simple TOML-configured rules (OPA integration is a future milestone)
 - **Storage**: Local SQLite with WAL mode, hash-chained events
 - **Signing**: Ed25519 via ed25519-dalek
-- **CLI**: clap with subcommands: `init`, `start`, `audit`, `report`, `tail`, `stats`
+- **HTTP framework**: axum (for HTTP proxy mode)
+- **CLI**: clap with subcommands: `init`, `start`, `start-http`, `audit`, `report`, `tail`, `stats`
 
 ## Source layout
 
@@ -34,8 +35,9 @@ src/
 │   ├── event.rs     AgentActionEvent schema, hash computation
 │   └── local.rs     LocalLedger (SQLite), ReportStats, ToolStats, LatencyStats, chain verification, filtered queries, tail support
 ├── proxy/
-│   ├── mod.rs
-│   └── stdio.rs     run_stdio_proxy — the core stdio intercept loop
+│   ├── mod.rs       Shared log_event function used by both proxy modes
+│   ├── stdio.rs     run_stdio_proxy — stdio intercept loop
+│   └── http.rs      run_http_proxy — HTTP/SSE reverse proxy (axum, MCP Streamable HTTP)
 └── report/mod.rs    HTML activity report generator
 ```
 
@@ -46,23 +48,26 @@ src/
 - **Guardrails before forwarding**: Blocked calls never reach the upstream MCP server. The proxy synthesizes a JSON-RPC error response directly.
 - **Tracing to stderr**: All log output goes to stderr so it doesn't interfere with stdio JSON-RPC on stdout.
 - **Protocol-agnostic event schema**: AgentActionEvent doesn't depend on MCP specifics. The interception layer is MCP-specific, but the logging/signing/policy layer is designed to support future protocols (A2A, ACP).
+- **HTTP proxy uses axum + reqwest**: The HTTP proxy listens on a single endpoint, handles POST/GET/DELETE per the MCP Streamable HTTP spec. Session IDs and auth headers are forwarded transparently. SSE streams are passed through with inline inspection for tool call response logging.
+- **Shared log_event**: Both stdio and HTTP proxy use the same `log_event` function in `proxy/mod.rs`. The `tool_server` field distinguishes the transport ("stdio" vs upstream URL).
 
 ## Build and test
 
 ```bash
 cargo build          # builds the `estoppl` binary
-cargo test           # runs all 42 tests (unit + integration)
+cargo test           # runs all 46 tests (unit + integration)
 cargo run -- init    # test the init command
 ```
 
 ### Test coverage
 
-- **Unit tests** (36): inline `#[cfg(test)]` modules in each source file
+- **Unit tests** (40): inline `#[cfg(test)]` modules in each source file
   - `mcp/types.rs` — JSON-RPC parsing, tool call detection, serialization
   - `identity/mod.rs` — key generation, persistence, sign/verify roundtrip
   - `ledger/event.rs` — hash determinism, field sensitivity, chain linking
   - `ledger/local.rs` — append/query, chain verification (intact/broken/tampered), filters, stats, tail
   - `policy/mod.rs` — block lists, wildcards, human review, amount thresholds, rate limiting
+  - `proxy/http.rs` — response merging (single + blocked, batch + blocked, empty blocked), policy in batch context
 - **Integration tests** (6): `tests/integration.rs`
   - CLI commands (`init`, `audit`, `audit --verify`, `report`)
   - End-to-end stdio proxy with a fake MCP server (allowed + blocked calls, chain verification)

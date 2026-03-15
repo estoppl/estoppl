@@ -5,13 +5,18 @@ See what your AI agent is doing. Stop it when it goes wrong.
 `estoppl` is a transparent proxy for MCP (Model Context Protocol) that gives you full visibility into every tool call your agent makes — and lets you set guardrails so it can't do things it shouldn't.
 
 ```
+stdio mode:
 ┌──────────────┐                  ┌─────────────┐                  ┌──────────────┐
 │  Agent Host  │ ── stdin ──────▶ │   estoppl   │ ── stdin ──────▶ │  MCP Server  │
-│  (Claude,    │ ◀── stdout ───── │             │ ◀── stdout ───── │  (Stripe,    │
-│   LangChain) │                  │  intercept  │                  │   Plaid, etc)│
-└──────────────┘                  │  guardrails │                  └──────────────┘
+│  (Claude,    │ ◀── stdout ───── │             │ ◀── stdout ───── │  (local)     │
+│   LangChain) │                  │  intercept  │                  └──────────────┘
+└──────────────┘                  │  guardrails │
                                   │  log + sign │
-                                  └──────┬──────┘
+HTTP mode:                        └──────┬──────┘
+┌──────────────┐                  ┌──────┴──────┐                  ┌──────────────┐
+│  MCP Client  │ ── POST/SSE ──▶ │   estoppl   │ ── POST/SSE ──▶ │  MCP Server  │
+│              │ ◀── JSON/SSE ── │  :4100      │ ◀── JSON/SSE ── │  (remote)    │
+└──────────────┘                  └──────┬──────┘                  └──────────────┘
                                          │
                                   ┌──────▼──────┐
                                   │  audit log  │
@@ -41,8 +46,11 @@ cargo install --path .
 # Initialize config, keypair, and database
 estoppl init --agent-id my-agent
 
-# Start the proxy (wraps your MCP server)
+# Start the proxy — stdio mode (wraps a local MCP server process)
 estoppl start --upstream-cmd npx --upstream-args @stripe/mcp-server
+
+# Start the proxy — HTTP mode (reverse proxy for remote MCP servers)
+estoppl start-http --upstream-url http://localhost:3000/mcp
 
 # See what your agent has been doing
 estoppl audit -n 50
@@ -52,6 +60,8 @@ estoppl report
 ```
 
 ## MCP client configuration
+
+### stdio mode (local MCP servers)
 
 Drop the proxy into your MCP client config — one change, zero code modifications:
 
@@ -69,6 +79,29 @@ Drop the proxy into your MCP client config — one change, zero code modificatio
   }
 }
 ```
+
+### HTTP mode (remote MCP servers)
+
+For MCP servers running over HTTP (Streamable HTTP transport), run the proxy as a reverse proxy:
+
+```bash
+# Start the proxy (listens on 127.0.0.1:4100 by default)
+estoppl start-http --upstream-url https://mcp.stripe.com/v1
+
+# Point your MCP client at the proxy instead of the upstream server
+```
+
+```json
+{
+  "mcpServers": {
+    "stripe": {
+      "url": "http://127.0.0.1:4100"
+    }
+  }
+}
+```
+
+The HTTP proxy supports the full MCP Streamable HTTP transport: POST (JSON-RPC requests, including batches), GET (SSE streams for server-initiated messages), and DELETE (session termination). Session IDs and auth headers are forwarded transparently.
 
 Your agent doesn't know estoppl is there. Every tool call passes through transparently.
 
@@ -153,18 +186,20 @@ src/
 ├── identity/        Ed25519 key management and signing
 ├── policy/          Rules-based policy engine
 ├── ledger/          Local SQLite storage with hash chaining
-├── proxy/           stdio proxy core
+├── proxy/           stdio + HTTP/SSE proxy core
 └── report/          HTML compliance report generator
 ```
 
 ## Roadmap
 
-### Current (v0.2)
+### Current (v0.3)
 - [x] stdio proxy mode (transparent MCP interception)
+- [x] HTTP/SSE proxy mode (MCP Streamable HTTP transport — POST, GET SSE, DELETE)
+- [x] JSON-RPC batch support (mixed blocked + allowed in same batch)
 - [x] Guardrails: tool block/allow lists, amount thresholds, human review flags
 - [x] Ed25519 event signing
 - [x] Hash-chained local SQLite audit log
-- [x] CLI: `init`, `start`, `audit`, `report`, `tail`, `stats`
+- [x] CLI: `init`, `start`, `start-http`, `audit`, `report`, `tail`, `stats`
 - [x] HTML activity report
 - [x] `estoppl tail` — live-stream tool calls in your terminal as they happen
 - [x] Rate limiting / circuit breaker — block tools called more than N times per minute
@@ -172,19 +207,19 @@ src/
 - [x] Audit filters — `--tool`, `--decision`, `--since`
 - [x] CI + prebuilt binaries (macOS, Linux) via GitHub Releases
 
-### Next (v0.3)
+### Next (v0.4)
+- [ ] `--sync` flag to stream signed events to a cloud endpoint
 - [ ] Homebrew tap (`brew install estoppl`)
 - [ ] npm wrapper package (`npx estoppl` — binary distribution, no Rust required)
-- [ ] pip wrapper package (`pip install estoppl`)
-- [ ] HTTP/SSE reverse proxy mode (for remote MCP servers)
 - [ ] OPA (Open Policy Agent) integration for enterprise policy management
 
 ### Future
-- [ ] Python and TypeScript SDKs
+- [ ] Cloud dashboard with real-time event feed and alerting
 - [ ] Cloud ledger with immutable WORM storage for regulated industries
-- [ ] Compliance evidence packs for SEC, FINRA, and EU AI Act
+- [ ] Framework-agnostic compliance report templates (EU AI Act, SEC, SOC 2)
+- [ ] A2A (Agent-to-Agent) protocol interception for multi-agent delegation chains
+- [ ] Agent Skill provenance logging
 - [ ] Kubernetes sidecar deployment
-- [ ] A2A (Agent-to-Agent) protocol support
 - [ ] Cross-org agent trust verification
 
 ## For regulated teams

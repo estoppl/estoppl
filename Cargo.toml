@@ -28,8 +28,13 @@ rand = "0.8"
 # Local storage
 rusqlite = { version = "0.31", features = ["bundled"] }
 
-# HTTP client (for cloud ledger in future)
-reqwest = { version = "0.12", features = ["json"] }
+# HTTP client (for cloud ledger and upstream forwarding)
+reqwest = { version = "0.12", features = ["json", "stream"] }
+
+# HTTP server (for HTTP/SSE proxy mode)
+axum = "0.8"
+futures = "0.3"
+bytes = "1"
 
 # Identity
 uuid = { version = "1", features = ["v7"] }
