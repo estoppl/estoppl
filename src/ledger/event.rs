@@ -26,6 +26,10 @@ pub struct AgentActionEvent {
     pub latency_ms: i64,
 
     // Tamper-evidence chain
+    /// Monotonically increasing sequence number per proxy instance (proxy_key_id).
+    /// Enables gap detection during cloud sync — if the cloud receives seq 50 then 53,
+    /// it knows events 51-52 are missing and can request them.
+    pub sequence_number: i64,
     pub prev_hash: String,
     pub event_hash: String,
     pub signature: String,
@@ -49,6 +53,7 @@ impl AgentActionEvent {
             "policy_decision": self.policy_decision,
             "policy_rule": self.policy_rule,
             "latency_ms": self.latency_ms,
+            "sequence_number": self.sequence_number,
             "prev_hash": self.prev_hash,
         });
 
@@ -85,6 +90,7 @@ mod tests {
             policy_decision: "ALLOW".to_string(),
             policy_rule: "".to_string(),
             latency_ms: 2,
+            sequence_number: 0,
             prev_hash: prev_hash.to_string(),
             event_hash: "".to_string(),
             signature: "".to_string(),
@@ -120,6 +126,14 @@ mod tests {
     fn prev_hash_affects_event_hash() {
         let e1 = make_event("evt-1", "");
         let e2 = make_event("evt-1", "abc123");
+        assert_ne!(e1.compute_hash(), e2.compute_hash());
+    }
+
+    #[test]
+    fn sequence_number_affects_hash() {
+        let e1 = make_event("evt-1", "");
+        let mut e2 = make_event("evt-1", "");
+        e2.sequence_number = 42;
         assert_ne!(e1.compute_hash(), e2.compute_hash());
     }
 

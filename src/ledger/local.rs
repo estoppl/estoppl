@@ -40,6 +40,7 @@ impl LocalLedger {
                 policy_decision TEXT NOT NULL,
                 policy_rule     TEXT NOT NULL DEFAULT '',
                 latency_ms      INTEGER NOT NULL DEFAULT 0,
+                sequence_number INTEGER NOT NULL DEFAULT 0,
                 prev_hash       TEXT NOT NULL DEFAULT '',
                 event_hash      TEXT NOT NULL,
                 signature       TEXT NOT NULL,
@@ -51,13 +52,18 @@ impl LocalLedger {
             CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
             CREATE INDEX IF NOT EXISTS idx_events_tool_name ON events(tool_name);
             CREATE INDEX IF NOT EXISTS idx_events_policy_decision ON events(policy_decision);
+            CREATE INDEX IF NOT EXISTS idx_events_sequence ON events(sequence_number);
 
             -- Tracks the sync watermark for cloud ledger streaming.
+            -- last_synced_sequence + last_synced_hash enable chain continuity
+            -- verification across network partitions.
             CREATE TABLE IF NOT EXISTS sync_state (
-                id          INTEGER PRIMARY KEY CHECK (id = 1),
-                last_rowid  INTEGER NOT NULL DEFAULT 0,
-                last_sync   TEXT NOT NULL DEFAULT '',
-                sync_errors INTEGER NOT NULL DEFAULT 0
+                id                   INTEGER PRIMARY KEY CHECK (id = 1),
+                last_rowid           INTEGER NOT NULL DEFAULT 0,
+                last_synced_sequence INTEGER NOT NULL DEFAULT 0,
+                last_synced_hash     TEXT NOT NULL DEFAULT '',
+                last_sync            TEXT NOT NULL DEFAULT '',
+                sync_errors          INTEGER NOT NULL DEFAULT 0
             );
             INSERT OR IGNORE INTO sync_state (id, last_rowid) VALUES (1, 0);",
         )?;
@@ -71,9 +77,9 @@ impl LocalLedger {
             "INSERT INTO events (
                 event_id, agent_id, agent_version, authorized_by, session_id,
                 timestamp, tool_name, tool_server, input_hash, output_hash,
-                policy_decision, policy_rule, latency_ms,
+                policy_decision, policy_rule, latency_ms, sequence_number,
                 prev_hash, event_hash, signature, proxy_key_id
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
             rusqlite::params![
                 event.event_id,
                 event.agent_id,
@@ -88,6 +94,7 @@ impl LocalLedger {
                 event.policy_decision,
                 event.policy_rule,
                 event.latency_ms,
+                event.sequence_number,
                 event.prev_hash,
                 event.event_hash,
                 event.signature,
@@ -95,6 +102,18 @@ impl LocalLedger {
             ],
         )?;
         Ok(())
+    }
+
+    /// Get the next sequence number for this proxy instance.
+    /// Sequence numbers are monotonically increasing and gap-free locally.
+    /// The cloud uses these to detect missing events during sync.
+    pub fn next_sequence_number(&self) -> Result<i64> {
+        let max: i64 = self.conn.query_row(
+            "SELECT COALESCE(MAX(sequence_number), 0) FROM events",
+            [],
+            |r| r.get(0),
+        )?;
+        Ok(max + 1)
     }
 
     /// Get the hash of the most recent event (for chain linking).
@@ -128,13 +147,7 @@ impl LocalLedger {
         decision: Option<&str>,
         since: Option<&str>,
     ) -> Result<Vec<AgentActionEvent>> {
-        let mut sql = String::from(
-            "SELECT event_id, agent_id, agent_version, authorized_by, session_id,
-                    timestamp, tool_name, tool_server, input_hash, output_hash,
-                    policy_decision, policy_rule, latency_ms,
-                    prev_hash, event_hash, signature, proxy_key_id
-             FROM events",
-        );
+        let mut sql = format!("SELECT {} FROM events", Self::EVENT_COLUMNS);
 
         let mut conditions: Vec<String> = vec![];
         let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![];
@@ -189,13 +202,11 @@ impl LocalLedger {
 
     /// Get events newer than the given rowid (for tail/streaming).
     pub fn events_after_rowid(&self, after_rowid: i64) -> Result<(Vec<AgentActionEvent>, i64)> {
-        let mut stmt = self.conn.prepare(
-            "SELECT event_id, agent_id, agent_version, authorized_by, session_id,
-                    timestamp, tool_name, tool_server, input_hash, output_hash,
-                    policy_decision, policy_rule, latency_ms,
-                    prev_hash, event_hash, signature, proxy_key_id, rowid
-             FROM events WHERE rowid > ?1 ORDER BY rowid ASC",
-        )?;
+        let sql = format!(
+            "SELECT {}, rowid FROM events WHERE rowid > ?1 ORDER BY rowid ASC",
+            Self::EVENT_COLUMNS,
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
 
         let events: Vec<AgentActionEvent> = stmt
             .query_map([after_rowid], Self::row_to_event)?
@@ -232,10 +243,57 @@ impl LocalLedger {
     }
 
     /// Update the sync cursor after successful cloud upload.
-    pub fn update_sync_cursor(&self, rowid: i64) -> Result<()> {
+    /// Stores the rowid watermark, the last synced sequence number, and the
+    /// event_hash of the last synced event (for chain continuity verification
+    /// at the next batch boundary).
+    pub fn update_sync_cursor(
+        &self,
+        rowid: i64,
+        last_sequence: i64,
+        last_hash: &str,
+    ) -> Result<()> {
         self.conn.execute(
-            "UPDATE sync_state SET last_rowid = ?1, last_sync = datetime('now'), sync_errors = 0 WHERE id = 1",
-            rusqlite::params![rowid],
+            "UPDATE sync_state SET last_rowid = ?1, last_synced_sequence = ?2, last_synced_hash = ?3, last_sync = datetime('now'), sync_errors = 0 WHERE id = 1",
+            rusqlite::params![rowid, last_sequence, last_hash],
+        )?;
+        Ok(())
+    }
+
+    /// Get the last synced sequence number and event hash.
+    /// Used to build chain metadata for sync batches.
+    pub fn get_sync_chain_state(&self) -> Result<(i64, String)> {
+        let row: (i64, String) = self.conn.query_row(
+            "SELECT last_synced_sequence, last_synced_hash FROM sync_state WHERE id = 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        Ok(row)
+    }
+
+    /// Reset the sync cursor to re-send events from a specific sequence number.
+    /// Called when the cloud reports a gap and requests events starting from `from_sequence`.
+    pub fn reset_sync_cursor_to_sequence(&self, from_sequence: i64) -> Result<()> {
+        // Find the rowid of the event just before `from_sequence` so unsynced_events
+        // will return events starting from `from_sequence`.
+        let rowid: i64 = self.conn.query_row(
+            "SELECT COALESCE(MAX(rowid), 0) FROM events WHERE sequence_number < ?1",
+            rusqlite::params![from_sequence],
+            |r| r.get(0),
+        )?;
+
+        // Also reset the last_synced_sequence/hash to the event just before the gap.
+        let (seq, hash): (i64, String) = self
+            .conn
+            .query_row(
+                "SELECT sequence_number, event_hash FROM events WHERE sequence_number < ?1 ORDER BY sequence_number DESC LIMIT 1",
+                rusqlite::params![from_sequence],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap_or((0, String::new()));
+
+        self.conn.execute(
+            "UPDATE sync_state SET last_rowid = ?1, last_synced_sequence = ?2, last_synced_hash = ?3 WHERE id = 1",
+            rusqlite::params![rowid, seq, hash],
         )?;
         Ok(())
     }
@@ -253,20 +311,16 @@ impl LocalLedger {
     pub fn unsynced_events(&self, batch_size: u32) -> Result<(Vec<AgentActionEvent>, i64)> {
         let cursor = self.get_sync_cursor()?;
 
-        let mut stmt = self.conn.prepare(
-            "SELECT event_id, agent_id, agent_version, authorized_by, session_id,
-                    timestamp, tool_name, tool_server, input_hash, output_hash,
-                    policy_decision, policy_rule, latency_ms,
-                    prev_hash, event_hash, signature, proxy_key_id, rowid
-             FROM events WHERE rowid > ?1 ORDER BY rowid ASC LIMIT ?2",
-        )?;
+        let sql = format!(
+            "SELECT {}, rowid FROM events WHERE rowid > ?1 ORDER BY rowid ASC LIMIT ?2",
+            Self::EVENT_COLUMNS,
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
 
         let mut max_rowid = cursor;
         let events: Vec<AgentActionEvent> = stmt
             .query_map(rusqlite::params![cursor, batch_size], |row| {
-                let rowid: i64 = row.get(17)?;
-                // We can't mutate max_rowid inside the closure directly for the return,
-                // but we capture the last rowid from the events after collecting.
+                let rowid: i64 = row.get(18)?;
                 let event = Self::row_to_event(row)?;
                 Ok((event, rowid))
             })?
@@ -376,6 +430,12 @@ impl LocalLedger {
         Ok(stats)
     }
 
+    /// Standard SELECT column list for events (used by all query methods).
+    const EVENT_COLUMNS: &str = "event_id, agent_id, agent_version, authorized_by, session_id,
+         timestamp, tool_name, tool_server, input_hash, output_hash,
+         policy_decision, policy_rule, latency_ms, sequence_number,
+         prev_hash, event_hash, signature, proxy_key_id";
+
     fn row_to_event(row: &rusqlite::Row) -> rusqlite::Result<AgentActionEvent> {
         let ts_str: String = row.get(5)?;
         let timestamp = chrono::DateTime::parse_from_rfc3339(&ts_str)
@@ -396,10 +456,11 @@ impl LocalLedger {
             policy_decision: row.get(10)?,
             policy_rule: row.get(11)?,
             latency_ms: row.get(12)?,
-            prev_hash: row.get(13)?,
-            event_hash: row.get(14)?,
-            signature: row.get(15)?,
-            proxy_key_id: row.get(16)?,
+            sequence_number: row.get(13)?,
+            prev_hash: row.get(14)?,
+            event_hash: row.get(15)?,
+            signature: row.get(16)?,
+            proxy_key_id: row.get(17)?,
         })
     }
 
@@ -552,6 +613,16 @@ mod tests {
         decision: &str,
         prev_hash: &str,
     ) -> AgentActionEvent {
+        make_signed_event_seq(event_id, tool_name, decision, prev_hash, 0)
+    }
+
+    fn make_signed_event_seq(
+        event_id: &str,
+        tool_name: &str,
+        decision: &str,
+        prev_hash: &str,
+        sequence_number: i64,
+    ) -> AgentActionEvent {
         let mut event = AgentActionEvent {
             event_id: event_id.to_string(),
             agent_id: "test-agent".to_string(),
@@ -566,6 +637,7 @@ mod tests {
             policy_decision: decision.to_string(),
             policy_rule: "".to_string(),
             latency_ms: 2,
+            sequence_number,
             prev_hash: prev_hash.to_string(),
             event_hash: "".to_string(),
             signature: "fake-sig".to_string(),
@@ -764,6 +836,94 @@ mod tests {
         assert_eq!(new_events.len(), 1);
         assert_eq!(new_events[0].event_id, "evt-2");
         assert!(new_rowid > rowid);
+    }
+
+    #[test]
+    fn next_sequence_number_starts_at_one() {
+        let (ledger, _dir) = open_temp_ledger();
+        assert_eq!(ledger.next_sequence_number().unwrap(), 1);
+    }
+
+    #[test]
+    fn next_sequence_number_increments() {
+        let (ledger, _dir) = open_temp_ledger();
+
+        let e1 = make_signed_event_seq("evt-1", "tool_a", "ALLOW", "", 1);
+        ledger.append(&e1).unwrap();
+        assert_eq!(ledger.next_sequence_number().unwrap(), 2);
+
+        let e2 = make_signed_event_seq("evt-2", "tool_b", "ALLOW", &e1.event_hash, 2);
+        ledger.append(&e2).unwrap();
+        assert_eq!(ledger.next_sequence_number().unwrap(), 3);
+    }
+
+    #[test]
+    fn sequence_number_roundtrips_through_db() {
+        let (ledger, _dir) = open_temp_ledger();
+
+        let e1 = make_signed_event_seq("evt-1", "tool_a", "ALLOW", "", 42);
+        ledger.append(&e1).unwrap();
+
+        let events = ledger.query_events(None, None).unwrap();
+        assert_eq!(events[0].sequence_number, 42);
+    }
+
+    #[test]
+    fn sync_chain_state_tracks_sequence_and_hash() {
+        let (ledger, _dir) = open_temp_ledger();
+
+        let e1 = make_signed_event_seq("evt-1", "tool_a", "ALLOW", "", 1);
+        ledger.append(&e1).unwrap();
+
+        let (seq, hash) = ledger.get_sync_chain_state().unwrap();
+        assert_eq!(seq, 0);
+        assert_eq!(hash, "");
+
+        let max_rowid = ledger.max_rowid().unwrap();
+        ledger
+            .update_sync_cursor(max_rowid, 1, &e1.event_hash)
+            .unwrap();
+
+        let (seq, hash) = ledger.get_sync_chain_state().unwrap();
+        assert_eq!(seq, 1);
+        assert_eq!(hash, e1.event_hash);
+    }
+
+    #[test]
+    fn reset_sync_cursor_to_sequence() {
+        let (ledger, _dir) = open_temp_ledger();
+
+        // Insert 5 events with sequence 1-5.
+        let e1 = make_signed_event_seq("evt-1", "tool_a", "ALLOW", "", 1);
+        ledger.append(&e1).unwrap();
+        let e2 = make_signed_event_seq("evt-2", "tool_a", "ALLOW", &e1.event_hash, 2);
+        ledger.append(&e2).unwrap();
+        let e3 = make_signed_event_seq("evt-3", "tool_a", "ALLOW", &e2.event_hash, 3);
+        ledger.append(&e3).unwrap();
+        let e4 = make_signed_event_seq("evt-4", "tool_a", "ALLOW", &e3.event_hash, 4);
+        ledger.append(&e4).unwrap();
+        let e5 = make_signed_event_seq("evt-5", "tool_a", "ALLOW", &e4.event_hash, 5);
+        ledger.append(&e5).unwrap();
+
+        // Sync all 5.
+        let max_rowid = ledger.max_rowid().unwrap();
+        ledger
+            .update_sync_cursor(max_rowid, 5, &e5.event_hash)
+            .unwrap();
+
+        // Cloud says: "I only have up to seq 3, send me from seq 4."
+        ledger.reset_sync_cursor_to_sequence(4).unwrap();
+
+        // Now unsynced_events should return events 4 and 5.
+        let (events, _) = ledger.unsynced_events(100).unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].sequence_number, 4);
+        assert_eq!(events[1].sequence_number, 5);
+
+        // Chain state should reflect seq 3.
+        let (seq, hash) = ledger.get_sync_chain_state().unwrap();
+        assert_eq!(seq, 3);
+        assert_eq!(hash, e3.event_hash);
     }
 
     #[test]

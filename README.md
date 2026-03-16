@@ -166,6 +166,7 @@ i9j0k1l2   stripe.create_payment          BLOCK        2026-03-05 14:23:05    0m
 Each event is:
 - **Signed** with Ed25519 — proves the proxy produced it
 - **Hash-chained** — each event links to the previous one; tampering breaks the chain
+- **Sequence-numbered** — monotonically increasing per proxy instance; enables gap detection during cloud sync
 - **Zero-retention** — only SHA-256 hashes of inputs/outputs are stored, never raw data
 
 Verify the chain hasn't been tampered with:
@@ -201,6 +202,16 @@ The `--sync` flag starts a background task that:
 - Retries with exponential backoff on failures (1s → 2s → 4s → ... capped at 5min)
 
 All events stay in the local audit log regardless of sync status. The cloud is additive — if the network is down, events queue locally and sync when connectivity returns.
+
+### Chain integrity under network partition
+
+Every event carries a monotonically increasing `sequence_number` that is included in the event hash (tamper-evident). Each sync batch includes chain metadata:
+
+- **Sequence range** (`first_sequence` / `last_sequence`) — lets the cloud detect gaps (e.g., "I have 1-50, you sent 53-100, where are 51-52?")
+- **`expected_prev_hash`** — the event hash the cloud should already have for the event before this batch, proving chain continuity across batch boundaries
+- **`batch_hash`** — SHA-256 of all event hashes in the batch, verifying nothing was tampered with in transit
+
+If the cloud detects a gap, it responds with `gap_from_sequence` and the proxy automatically rewinds its cursor and re-sends the missing events. The local hash chain stays valid regardless of sync state — events are always chained correctly in SQLite first, then synced to cloud as a best-effort background operation.
 
 ## Project structure
 

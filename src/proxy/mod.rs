@@ -13,6 +13,12 @@ use crate::policy::PolicyDecision;
 
 /// Create, sign, and append an event to the local ledger.
 /// Shared between stdio and HTTP proxy modes.
+///
+/// Assigns a monotonically increasing sequence number to each event.
+/// The sequence number is included in the event hash, making it tamper-evident.
+/// The cloud uses sequence numbers to detect gaps during sync (e.g., if the proxy
+/// loses connection, events queue locally and the cloud can detect missing sequence
+/// numbers on reconnect).
 #[allow(clippy::too_many_arguments)]
 pub fn log_event(
     ledger: &LocalLedger,
@@ -29,6 +35,7 @@ pub fn log_event(
     latency_ms: i64,
 ) -> Result<()> {
     let prev_hash = ledger.last_event_hash()?;
+    let sequence_number = ledger.next_sequence_number()?;
 
     let mut event = AgentActionEvent {
         event_id: Uuid::now_v7().to_string(),
@@ -44,6 +51,7 @@ pub fn log_event(
         policy_decision: decision.as_str().to_string(),
         policy_rule: decision.rule_name().to_string(),
         latency_ms,
+        sequence_number,
         prev_hash,
         event_hash: String::new(),
         signature: String::new(),
