@@ -137,6 +137,9 @@ amount_field = "amount"
 
 [ledger]
 db_path = ".estoppl/events.db"
+# Cloud sync — stream signed events to the Estoppl cloud ledger
+# cloud_endpoint = "https://api.estoppl.com/v1/events"
+# cloud_api_key = "sk_your_key"
 ```
 
 ### Guardrails
@@ -176,6 +179,29 @@ Generate an HTML report to share with your team:
 estoppl report --output report.html
 ```
 
+## Cloud sync
+
+Stream your signed audit events to the Estoppl cloud for centralized monitoring, alerting, and compliance evidence.
+
+```bash
+# Configure the cloud endpoint in estoppl.toml
+# [ledger]
+# cloud_endpoint = "https://api.estoppl.com/v1/events"
+# cloud_api_key = "sk_your_key"
+
+# Start the proxy with cloud sync enabled
+estoppl start --upstream-cmd npx --upstream-args @stripe/mcp-server --sync
+estoppl start-http --upstream-url http://localhost:3000/mcp --sync
+```
+
+The `--sync` flag starts a background task that:
+- Polls local SQLite for new events every 5 seconds
+- Batches events (up to 100) and POSTs them to the cloud endpoint
+- Tracks a sync watermark so it picks up where it left off (survives restarts)
+- Retries with exponential backoff on failures (1s → 2s → 4s → ... capped at 5min)
+
+All events stay in the local audit log regardless of sync status. The cloud is additive — if the network is down, events queue locally and sync when connectivity returns.
+
 ## Project structure
 
 ```
@@ -187,12 +213,13 @@ src/
 ├── policy/          Rules-based policy engine
 ├── ledger/          Local SQLite storage with hash chaining
 ├── proxy/           stdio + HTTP/SSE proxy core
+├── sync/            Cloud sync background task
 └── report/          HTML compliance report generator
 ```
 
 ## Roadmap
 
-### Current (v0.3)
+### Current (v0.4)
 - [x] stdio proxy mode (transparent MCP interception)
 - [x] HTTP/SSE proxy mode (MCP Streamable HTTP transport — POST, GET SSE, DELETE)
 - [x] JSON-RPC batch support (mixed blocked + allowed in same batch)
@@ -206,9 +233,9 @@ src/
 - [x] `estoppl stats` — tool call volume, latency percentiles, per-tool and per-session breakdown
 - [x] Audit filters — `--tool`, `--decision`, `--since`
 - [x] CI + prebuilt binaries (macOS, Linux) via GitHub Releases
+- [x] `--sync` flag — stream signed events to cloud endpoint (bridge to cloud dashboard)
 
-### Next (v0.4)
-- [ ] `--sync` flag to stream signed events to a cloud endpoint
+### Next (v0.5)
 - [ ] Homebrew tap (`brew install estoppl`)
 - [ ] npm wrapper package (`npx estoppl` — binary distribution, no Rust required)
 - [ ] OPA (Open Policy Agent) integration for enterprise policy management

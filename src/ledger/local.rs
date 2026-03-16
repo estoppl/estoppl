@@ -50,7 +50,16 @@ impl LocalLedger {
             CREATE INDEX IF NOT EXISTS idx_events_agent_id ON events(agent_id);
             CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
             CREATE INDEX IF NOT EXISTS idx_events_tool_name ON events(tool_name);
-            CREATE INDEX IF NOT EXISTS idx_events_policy_decision ON events(policy_decision);",
+            CREATE INDEX IF NOT EXISTS idx_events_policy_decision ON events(policy_decision);
+
+            -- Tracks the sync watermark for cloud ledger streaming.
+            CREATE TABLE IF NOT EXISTS sync_state (
+                id          INTEGER PRIMARY KEY CHECK (id = 1),
+                last_rowid  INTEGER NOT NULL DEFAULT 0,
+                last_sync   TEXT NOT NULL DEFAULT '',
+                sync_errors INTEGER NOT NULL DEFAULT 0
+            );
+            INSERT OR IGNORE INTO sync_state (id, last_rowid) VALUES (1, 0);",
         )?;
 
         Ok(Self { conn })
@@ -210,6 +219,68 @@ impl LocalLedger {
                     r.get(0)
                 })?;
         Ok(rowid)
+    }
+
+    /// Get the current sync cursor (last synced rowid).
+    pub fn get_sync_cursor(&self) -> Result<i64> {
+        let rowid: i64 =
+            self.conn
+                .query_row("SELECT last_rowid FROM sync_state WHERE id = 1", [], |r| {
+                    r.get(0)
+                })?;
+        Ok(rowid)
+    }
+
+    /// Update the sync cursor after successful cloud upload.
+    pub fn update_sync_cursor(&self, rowid: i64) -> Result<()> {
+        self.conn.execute(
+            "UPDATE sync_state SET last_rowid = ?1, last_sync = datetime('now'), sync_errors = 0 WHERE id = 1",
+            rusqlite::params![rowid],
+        )?;
+        Ok(())
+    }
+
+    /// Increment sync error count (for observability).
+    pub fn increment_sync_errors(&self) -> Result<()> {
+        self.conn.execute(
+            "UPDATE sync_state SET sync_errors = sync_errors + 1 WHERE id = 1",
+            [],
+        )?;
+        Ok(())
+    }
+
+    /// Get events that haven't been synced yet (after the sync cursor).
+    pub fn unsynced_events(&self, batch_size: u32) -> Result<(Vec<AgentActionEvent>, i64)> {
+        let cursor = self.get_sync_cursor()?;
+
+        let mut stmt = self.conn.prepare(
+            "SELECT event_id, agent_id, agent_version, authorized_by, session_id,
+                    timestamp, tool_name, tool_server, input_hash, output_hash,
+                    policy_decision, policy_rule, latency_ms,
+                    prev_hash, event_hash, signature, proxy_key_id, rowid
+             FROM events WHERE rowid > ?1 ORDER BY rowid ASC LIMIT ?2",
+        )?;
+
+        let mut max_rowid = cursor;
+        let events: Vec<AgentActionEvent> = stmt
+            .query_map(rusqlite::params![cursor, batch_size], |row| {
+                let rowid: i64 = row.get(17)?;
+                // We can't mutate max_rowid inside the closure directly for the return,
+                // but we capture the last rowid from the events after collecting.
+                let event = Self::row_to_event(row)?;
+                Ok((event, rowid))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?
+            .into_iter()
+            .map(|(event, rowid)| {
+                if rowid > max_rowid {
+                    max_rowid = rowid;
+                }
+                event
+            })
+            .collect();
+
+        Ok((events, max_rowid))
     }
 
     /// Get per-tool statistics.

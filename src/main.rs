@@ -5,6 +5,7 @@ mod mcp;
 mod policy;
 mod proxy;
 mod report;
+mod sync;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -40,6 +41,10 @@ enum Commands {
         #[arg(long, num_args = 0..)]
         upstream_args: Vec<String>,
 
+        /// Stream signed events to the cloud endpoint configured in estoppl.toml.
+        #[arg(long)]
+        sync: bool,
+
         /// Path to estoppl config file.
         #[arg(long, short, default_value = "estoppl.toml")]
         config: PathBuf,
@@ -54,6 +59,10 @@ enum Commands {
         /// Address to listen on (e.g. "127.0.0.1:4100").
         #[arg(long, default_value = "127.0.0.1:4100")]
         listen: String,
+
+        /// Stream signed events to the cloud endpoint configured in estoppl.toml.
+        #[arg(long)]
+        sync: bool,
 
         /// Path to estoppl config file.
         #[arg(long, short, default_value = "estoppl.toml")]
@@ -131,13 +140,15 @@ async fn main() -> Result<()> {
         Commands::Start {
             upstream_cmd,
             upstream_args,
+            sync,
             config,
-        } => cmd_start(&upstream_cmd, &upstream_args, &config).await?,
+        } => cmd_start(&upstream_cmd, &upstream_args, sync, &config).await?,
         Commands::StartHttp {
             upstream_url,
             listen,
+            sync,
             config,
-        } => cmd_start_http(&upstream_url, &listen, &config).await?,
+        } => cmd_start_http(&upstream_url, &listen, sync, &config).await?,
         Commands::Report { output, config } => cmd_report(&output, &config)?,
         Commands::Audit {
             limit,
@@ -184,7 +195,12 @@ fn cmd_init(agent_id: &str) -> Result<()> {
     Ok(())
 }
 
-async fn cmd_start(upstream_cmd: &str, upstream_args: &[String], config_path: &Path) -> Result<()> {
+async fn cmd_start(
+    upstream_cmd: &str,
+    upstream_args: &[String],
+    sync_enabled: bool,
+    config_path: &Path,
+) -> Result<()> {
     let config = config::ProxyConfig::load(config_path)?;
     let key_dir = PathBuf::from(".estoppl/keys");
     let key_manager = identity::KeyManager::load_or_generate(&key_dir)?;
@@ -196,6 +212,9 @@ async fn cmd_start(upstream_cmd: &str, upstream_args: &[String], config_path: &P
         key_id = key_manager.key_id,
         "Estoppl proxy starting"
     );
+
+    // Start cloud sync background task if --sync is enabled.
+    let _sync_handle = maybe_start_sync(sync_enabled, &config)?;
 
     proxy::run_stdio_proxy(
         upstream_cmd,
@@ -210,7 +229,12 @@ async fn cmd_start(upstream_cmd: &str, upstream_args: &[String], config_path: &P
     .await
 }
 
-async fn cmd_start_http(upstream_url: &str, listen_addr: &str, config_path: &Path) -> Result<()> {
+async fn cmd_start_http(
+    upstream_url: &str,
+    listen_addr: &str,
+    sync_enabled: bool,
+    config_path: &Path,
+) -> Result<()> {
     let config = config::ProxyConfig::load(config_path)?;
     let key_dir = PathBuf::from(".estoppl/keys");
     let key_manager = identity::KeyManager::load_or_generate(&key_dir)?;
@@ -225,6 +249,9 @@ async fn cmd_start_http(upstream_url: &str, listen_addr: &str, config_path: &Pat
         "Estoppl HTTP proxy starting"
     );
 
+    // Start cloud sync background task if --sync is enabled.
+    let _sync_handle = maybe_start_sync(sync_enabled, &config)?;
+
     proxy::run_http_proxy(
         listen_addr,
         upstream_url,
@@ -236,6 +263,40 @@ async fn cmd_start_http(upstream_url: &str, listen_addr: &str, config_path: &Pat
         policy_engine,
     )
     .await
+}
+
+/// Start the cloud sync background task if --sync is enabled and cloud_endpoint is configured.
+/// Returns the task handle (kept alive by the caller) or None.
+fn maybe_start_sync(
+    sync_enabled: bool,
+    config: &config::ProxyConfig,
+) -> Result<Option<tokio::task::JoinHandle<()>>> {
+    if !sync_enabled {
+        return Ok(None);
+    }
+
+    let sync_config = sync::sync_config_from_ledger(
+        config.ledger.cloud_endpoint.as_deref(),
+        config.ledger.cloud_api_key.as_deref(),
+    );
+
+    let sync_config = match sync_config {
+        Some(c) => c,
+        None => {
+            anyhow::bail!(
+                "--sync requires [ledger] cloud_endpoint in estoppl.toml.\n\
+                 Example:\n  [ledger]\n  cloud_endpoint = \"https://api.estoppl.com/v1/events\"\n  cloud_api_key = \"sk_your_key\""
+            );
+        }
+    };
+
+    tracing::info!(endpoint = sync_config.endpoint, "Cloud sync enabled");
+
+    let (_shutdown_tx, shutdown_rx) = sync::shutdown_channel();
+    let syncer = sync::CloudSyncer::new(sync_config, config.ledger.db_path.clone(), shutdown_rx);
+    let handle = syncer.spawn();
+
+    Ok(Some(handle))
 }
 
 fn cmd_report(output: &Path, config_path: &Path) -> Result<()> {
