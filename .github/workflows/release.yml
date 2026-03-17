@@ -74,3 +74,63 @@ jobs:
         with:
           generate_release_notes: true
           files: artifacts/**/*.tar.gz
+
+  publish-crates:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Publish to crates.io
+        run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  publish-npm:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: "https://registry.npmjs.org"
+      - name: Publish to npm
+        working-directory: npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  update-homebrew:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Compute SHA256 checksums
+        id: sha
+        run: |
+          echo "darwin_aarch64=$(sha256sum artifacts/estoppl-darwin-aarch64/estoppl-darwin-aarch64.tar.gz | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+          echo "darwin_x86_64=$(sha256sum artifacts/estoppl-darwin-x86_64/estoppl-darwin-x86_64.tar.gz | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+          echo "linux_aarch64=$(sha256sum artifacts/estoppl-linux-aarch64/estoppl-linux-aarch64.tar.gz | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+          echo "linux_x86_64=$(sha256sum artifacts/estoppl-linux-x86_64/estoppl-linux-x86_64.tar.gz | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+
+      - name: Extract version
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Update Homebrew formula
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          repository: estoppl/homebrew-tap
+          event-type: update-formula
+          client-payload: |
+            {
+              "version": "${{ steps.version.outputs.version }}",
+              "darwin_aarch64_sha256": "${{ steps.sha.outputs.darwin_aarch64 }}",
+              "darwin_x86_64_sha256": "${{ steps.sha.outputs.darwin_x86_64 }}",
+              "linux_aarch64_sha256": "${{ steps.sha.outputs.linux_aarch64 }}",
+              "linux_x86_64_sha256": "${{ steps.sha.outputs.linux_x86_64 }}"
+            }

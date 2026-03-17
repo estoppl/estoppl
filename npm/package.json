@@ -1,0 +1,38 @@
+{
+  "name": "estoppl",
+  "version": "0.1.0",
+  "description": "Compliance proxy for AI agent tool calls (MCP) — intercepts, signs, and logs",
+  "license": "Apache-2.0",
+  "bin": {
+    "estoppl": "run.js"
+  },
+  "scripts": {
+    "postinstall": "node install.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/estoppl/estoppl"
+  },
+  "homepage": "https://estoppl.ai",
+  "keywords": [
+    "mcp",
+    "ai-agents",
+    "audit",
+    "compliance",
+    "proxy",
+    "model-context-protocol"
+  ],
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "files": [
+    "install.js",
+    "run.js",
+    "bin/"
+  ]
+}

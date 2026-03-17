@@ -1,4 +1,4 @@
-# estoppl-proxy
+# estoppl
 
 See what your AI agent is doing. Stop it when it goes wrong.
 
@@ -37,12 +37,48 @@ Estoppl fixes this:
 
 One config line. Zero code changes. Sub-millisecond overhead.
 
+## Install
+
+**Homebrew** (macOS and Linux):
+```bash
+brew tap estoppl/tap
+brew install estoppl
+```
+
+**npm** (any platform with Node.js):
+```bash
+npx estoppl
+# or install globally
+npm install -g estoppl
+```
+
+**Cargo** (Rust toolchain):
+```bash
+cargo install estoppl
+```
+
+**Binary download** (no dependencies):
+```bash
+# macOS Apple Silicon
+curl -L https://github.com/estoppl/estoppl/releases/latest/download/estoppl-darwin-aarch64.tar.gz | tar xz
+sudo mv estoppl-darwin-aarch64 /usr/local/bin/estoppl
+
+# macOS Intel
+curl -L https://github.com/estoppl/estoppl/releases/latest/download/estoppl-darwin-x86_64.tar.gz | tar xz
+sudo mv estoppl-darwin-x86_64 /usr/local/bin/estoppl
+
+# Linux x86_64
+curl -L https://github.com/estoppl/estoppl/releases/latest/download/estoppl-linux-x86_64.tar.gz | tar xz
+sudo mv estoppl-linux-x86_64 /usr/local/bin/estoppl
+
+# Linux ARM64
+curl -L https://github.com/estoppl/estoppl/releases/latest/download/estoppl-linux-aarch64.tar.gz | tar xz
+sudo mv estoppl-linux-aarch64 /usr/local/bin/estoppl
+```
+
 ## Quick start
 
 ```bash
-# Install
-cargo install --path .
-
 # Initialize config, keypair, and database
 estoppl init --agent-id my-agent
 
@@ -249,13 +285,17 @@ src/
 ### Next (v0.5)
 - [ ] Homebrew tap (`brew install estoppl`)
 - [ ] npm wrapper package (`npx estoppl` — binary distribution, no Rust required)
+- [ ] `estoppl wrap` — auto-detect and wrap existing MCP client configs (Claude Desktop, Cursor) in one command
+- [ ] Blocking human review — `HUMAN_REQUIRED` tools pause and wait for explicit approval before forwarding
+- [ ] `estoppl dashboard` — local web UI for browsing audit events, guardrail hits, and agent activity
 - [ ] OPA (Open Policy Agent) integration for enterprise policy management
 
 ### Future
 - [ ] Cloud dashboard with real-time event feed and alerting
 - [ ] Cloud ledger with immutable WORM storage for regulated industries
-- [ ] Framework-agnostic compliance report templates (EU AI Act, SEC, SOC 2)
+- [ ] OpenAI function calling interception (beyond MCP)
 - [ ] A2A (Agent-to-Agent) protocol interception for multi-agent delegation chains
+- [ ] Framework-agnostic compliance report templates (EU AI Act, SEC, SOC 2)
 - [ ] Agent Skill provenance logging
 - [ ] Kubernetes sidecar deployment
 - [ ] Cross-org agent trust verification

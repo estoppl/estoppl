@@ -427,7 +427,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "estoppl-proxy"
+name = "estoppl"
 version = "0.1.0"
 dependencies = [
  "anyhow",

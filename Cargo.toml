@@ -1,9 +1,13 @@
 [package]
-name = "estoppl-proxy"
+name = "estoppl"
 version = "0.1.0"
 edition = "2024"
 description = "Compliance proxy for AI agent tool calls — intercepts, signs, and logs MCP actions"
 license = "Apache-2.0"
+repository = "https://github.com/estoppl/estoppl"
+homepage = "https://estoppl.ai"
+keywords = ["mcp", "ai-agents", "audit", "compliance", "proxy"]
+categories = ["command-line-utilities"]
 
 [[bin]]
 name = "estoppl"
