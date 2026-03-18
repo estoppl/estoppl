@@ -158,11 +158,31 @@ Agent → estoppl proxy → [attestation ID] → API Provider (MCP Server)
 
 A local-only signature can be forged — the agent operator controls the signing key. The cloud is the neutral third party neither side controls, which is why both sides can trust it. This is the same trust model as payment networks: the merchant doesn't trust the cardholder's signature, they call the network.
 
+### Cloud platform
+
+The cloud layer serves two functions:
+
+**Verification API** (in the call path):
+- Real-time attestation verification for API providers
+- `GET api.estoppl.com/verify/{attestation_id}` returns agent, user, decision, chain status
+
+**Cloud dashboard** (management plane):
+- All agents across the org in one view — not per-machine, org-wide
+- Real-time event feed — tool calls streaming in as they happen
+- Per-agent and per-tool analytics — call volume, error rates, blocked calls
+- Alerting — "treasury-bot tried wire_transfer 50 times in a minute"
+- Remote kill switch — block a tool or shut down an agent org-wide; proxies poll for policy updates
+- Team access control — compliance team can view, only admins can change policy
+- Audit export — download the tamper-proof hash chain for regulators
+- WORM storage — immutable, legally defensible records (SEC 17a-4, FINRA)
+
+The local dashboard (`estoppl dashboard`) is the single-machine preview. The cloud dashboard is the multi-agent, multi-team, org-wide version with the verification API underneath.
+
 ### Phases
 
 - **Phase 1 (current)**: OSS proxy with local logging, signing, and guardrails
 - **Phase 2**: Attestation header added to forwarded requests (self-contained, signed)
-- **Phase 3**: Cloud verification API — API providers verify attestations against the cloud ledger
+- **Phase 3**: Cloud verification API + cloud dashboard
 - **Phase 4**: API providers require estoppl attestation for high-risk operations
 - **Phase 5**: Registry and network effects — public key directory, cross-org trust
 

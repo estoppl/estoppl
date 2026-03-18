@@ -4,9 +4,11 @@
 
 estoppl is an open-source transparent proxy for MCP (Model Context Protocol) tool calls, built by Estoppl. It sits between AI agent hosts and MCP servers, giving developers visibility into every tool call, enforcing guardrails, and producing a signed, hash-chained audit log.
 
+The long-term vision is to become the trust layer for AI agent tool calls — analogous to Visa for payments. API providers verify estoppl attestations before processing high-risk operations.
+
 This is the OSS layer of a two-layer architecture:
-- **estoppl (this repo)** — open source, installed everywhere, intercepts and logs
-- **estoppl-ledger (separate, closed)** — proprietary cloud service for WORM storage, compliance evidence packs, regulatory certification
+- **estoppl (this repo)** — open source proxy, installed everywhere, intercepts/logs/attests
+- **estoppl cloud (separate, closed)** — verification API, cloud dashboard (org-wide monitoring, alerting, kill switch), WORM storage for compliance
 
 ## Architecture
 

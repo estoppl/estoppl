@@ -216,7 +216,7 @@ Events always persist locally first. Cloud sync is best-effort with exponential 
 ### Future
 - [ ] **Attestation header** — signed proof of policy evaluation forwarded with each tool call
 - [ ] **Cloud verification API** — API providers verify attestations against the tamper-proof cloud ledger
-- [ ] **Cloud dashboard** with real-time alerting
+- [ ] **Cloud dashboard** — org-wide agent monitoring, alerting, remote kill switch, team access control
 - [ ] **Immutable WORM storage** for regulated industries (SEC 17a-4)
 - [ ] Blocking human review — tools pause until explicit approval
 - [ ] OPA integration for enterprise policy management
