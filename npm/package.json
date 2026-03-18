@@ -1,6 +1,6 @@
 {
   "name": "estoppl",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "Compliance proxy for AI agent tool calls (MCP) — intercepts, signs, and logs",
   "license": "Apache-2.0",
   "bin": {
