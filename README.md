@@ -105,6 +105,14 @@ estoppl stats
 
 # Generate an HTML report
 estoppl report
+
+# Auto-wrap your MCP client configs to route through estoppl
+estoppl wrap              # wraps Claude Desktop, Cursor, Windsurf configs
+estoppl wrap --dry-run    # preview changes without modifying
+estoppl wrap --restore    # restore original configs from backup
+
+# Open the local web dashboard
+estoppl dashboard         # http://127.0.0.1:4200
 ```
 
 ## MCP client configuration
@@ -273,7 +281,9 @@ src/
 ├── ledger/          Local SQLite storage with hash chaining
 ├── proxy/           stdio + HTTP/SSE proxy core
 ├── sync/            Cloud sync background task
-└── report/          HTML compliance report generator
+├── report/          HTML compliance report generator
+├── wrap/            Auto-wrap MCP client configs
+└── dashboard/       Local web dashboard (axum + embedded HTML)
 ```
 
 ## Roadmap
@@ -285,7 +295,7 @@ src/
 - [x] Guardrails: tool block/allow lists, amount thresholds, human review flags
 - [x] Ed25519 event signing
 - [x] Hash-chained local SQLite audit log
-- [x] CLI: `init`, `start`, `start-http`, `audit`, `report`, `tail`, `stats`
+- [x] CLI: `init`, `start`, `start-http`, `audit`, `report`, `tail`, `stats`, `wrap`, `dashboard`
 - [x] HTML activity report
 - [x] `estoppl tail` — live-stream tool calls in your terminal as they happen
 - [x] Rate limiting / circuit breaker — block tools called more than N times per minute
@@ -297,9 +307,9 @@ src/
 ### Next (v0.5)
 - [x] Homebrew tap (`brew install estoppl`)
 - [x] npm wrapper package (`npx estoppl` — binary distribution, no Rust required)
-- [ ] `estoppl wrap` — auto-detect and wrap existing MCP client configs (Claude Desktop, Cursor) in one command
+- [x] `estoppl wrap` — auto-detect and wrap existing MCP client configs (Claude Desktop, Cursor, Windsurf) in one command
 - [ ] Blocking human review — `HUMAN_REQUIRED` tools pause and wait for explicit approval before forwarding
-- [ ] `estoppl dashboard` — local web UI for browsing audit events, guardrail hits, and agent activity
+- [x] `estoppl dashboard` — local web UI for browsing audit events, guardrail hits, and agent activity
 - [ ] OPA (Open Policy Agent) integration for enterprise policy management
 
 ### Future
