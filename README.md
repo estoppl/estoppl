@@ -295,7 +295,7 @@ src/
 
 ## Roadmap
 
-### Current (v0.13.0)
+### Current (v0.14.0)
 - [x] stdio proxy mode (transparent MCP interception)
 - [x] HTTP/SSE proxy mode (MCP Streamable HTTP transport — POST, GET SSE, DELETE)
 - [x] JSON-RPC batch support (mixed blocked + allowed in same batch)

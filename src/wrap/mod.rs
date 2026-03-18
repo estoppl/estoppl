@@ -14,34 +14,29 @@ fn detect_clients() -> Vec<McpClient> {
         Err(_) => return vec![],
     };
 
-    let mut clients = vec![];
-
-    // Claude Desktop
     #[cfg(target_os = "macos")]
-    {
-        let path = home.join("Library/Application Support/Claude/claude_desktop_config.json");
-        clients.push(McpClient {
-            name: "Claude Desktop",
-            config_path: path,
-        });
-    }
-    #[cfg(target_os = "windows")]
-    {
-        if let Ok(appdata) = std::env::var("APPDATA") {
-            clients.push(McpClient {
-                name: "Claude Desktop",
-                config_path: PathBuf::from(appdata).join("Claude/claude_desktop_config.json"),
-            });
-        }
-    }
+    let mut clients = vec![McpClient {
+        name: "Claude Desktop",
+        config_path: home.join("Library/Application Support/Claude/claude_desktop_config.json"),
+    }];
 
-    // Cursor
+    #[cfg(target_os = "windows")]
+    let mut clients = if let Ok(appdata) = std::env::var("APPDATA") {
+        vec![McpClient {
+            name: "Claude Desktop",
+            config_path: PathBuf::from(appdata).join("Claude/claude_desktop_config.json"),
+        }]
+    } else {
+        vec![]
+    };
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let mut clients: Vec<McpClient> = vec![];
+
     clients.push(McpClient {
         name: "Cursor",
         config_path: home.join(".cursor/mcp.json"),
     });
-
-    // Windsurf
     clients.push(McpClient {
         name: "Windsurf",
         config_path: home.join(".codeium/windsurf/mcp_config.json"),
@@ -146,14 +141,14 @@ fn restore_config(config: &mut Value) -> usize {
             continue;
         }
 
-        if let Some(original) = obj.get("_estoppl_original").cloned() {
-            if let Some(orig_obj) = original.as_object() {
-                if let Some(cmd) = orig_obj.get("command") {
-                    obj.insert("command".to_string(), cmd.clone());
-                }
-                if let Some(args) = orig_obj.get("args") {
-                    obj.insert("args".to_string(), args.clone());
-                }
+        if let Some(original) = obj.get("_estoppl_original").cloned()
+            && let Some(orig_obj) = original.as_object()
+        {
+            if let Some(cmd) = orig_obj.get("command") {
+                obj.insert("command".to_string(), cmd.clone());
+            }
+            if let Some(args) = orig_obj.get("args") {
+                obj.insert("args".to_string(), args.clone());
             }
         }
 
@@ -171,10 +166,10 @@ pub fn run_wrap(dry_run: bool, restore: bool, client_filter: Option<&str>) -> Re
     let mut found_any = false;
 
     for client in &clients {
-        if let Some(filter) = client_filter {
-            if !client.name.to_lowercase().contains(&filter.to_lowercase()) {
-                continue;
-            }
+        if let Some(filter) = client_filter
+            && !client.name.to_lowercase().contains(&filter.to_lowercase())
+        {
+            continue;
         }
 
         if !client.config_path.exists() {
