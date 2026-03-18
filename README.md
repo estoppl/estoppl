@@ -14,8 +14,8 @@ stdio mode:
                                   │  log + sign │
 HTTP mode:                        └──────┬──────┘
 ┌──────────────┐                  ┌──────┴──────┐                  ┌──────────────┐
-│  MCP Client  │ ── POST/SSE ──▶ │   estoppl   │ ── POST/SSE ──▶ │  MCP Server  │
-│              │ ◀── JSON/SSE ── │  :4100      │ ◀── JSON/SSE ── │  (remote)    │
+│  MCP Client  │ ── POST/SSE ──▶  │   estoppl   │ ── POST/SSE ──▶  │  MCP Server  │
+│              │ ◀── JSON/SSE ──  │  :4100      │ ◀── JSON/SSE ──  │  (remote)    │
 └──────────────┘                  └──────┬──────┘                  └──────────────┘
                                          │
                                   ┌──────▼──────┐
@@ -288,7 +288,7 @@ src/
 
 ## Roadmap
 
-### Current (v0.4)
+### Current (v0.13.0)
 - [x] stdio proxy mode (transparent MCP interception)
 - [x] HTTP/SSE proxy mode (MCP Streamable HTTP transport — POST, GET SSE, DELETE)
 - [x] JSON-RPC batch support (mixed blocked + allowed in same batch)
@@ -302,23 +302,20 @@ src/
 - [x] `estoppl stats` — tool call volume, latency percentiles, per-tool and per-session breakdown
 - [x] Audit filters — `--tool`, `--decision`, `--since`
 - [x] CI + prebuilt binaries (macOS, Linux) via GitHub Releases
-- [x] `--sync` flag — stream signed events to cloud endpoint (bridge to cloud dashboard)
-
-### Next (v0.5)
+- [x] `--sync` flag — stream signed events to cloud endpoint
 - [x] Homebrew tap (`brew install estoppl`)
 - [x] npm wrapper package (`npx estoppl` — binary distribution, no Rust required)
-- [x] `estoppl wrap` — auto-detect and wrap existing MCP client configs (Claude Desktop, Cursor, Windsurf) in one command
-- [ ] Blocking human review — `HUMAN_REQUIRED` tools pause and wait for explicit approval before forwarding
-- [x] `estoppl dashboard` — local web UI for browsing audit events, guardrail hits, and agent activity
-- [ ] OPA (Open Policy Agent) integration for enterprise policy management
+- [x] `estoppl wrap` — auto-detect and wrap existing MCP client configs (Claude Desktop, Cursor, Windsurf)
+- [x] `estoppl dashboard` — local web UI for browsing audit events, guardrail hits, and chain verification
 
-### Future
+### Future (cloud / 3P integrations)
+- [ ] Blocking human review — `HUMAN_REQUIRED` tools pause and wait for explicit approval (requires dashboard approval flow or webhook)
+- [ ] OPA (Open Policy Agent) integration for enterprise policy management
 - [ ] Cloud dashboard with real-time event feed and alerting
 - [ ] Cloud ledger with immutable WORM storage for regulated industries
 - [ ] OpenAI function calling interception (beyond MCP)
 - [ ] A2A (Agent-to-Agent) protocol interception for multi-agent delegation chains
 - [ ] Framework-agnostic compliance report templates (EU AI Act, SEC, SOC 2)
-- [ ] Agent Skill provenance logging
 - [ ] Kubernetes sidecar deployment
 - [ ] Cross-org agent trust verification
 
