@@ -66,6 +66,8 @@ estoppl dashboard               # open http://127.0.0.1:4200
 
 That's it. Every MCP tool call now flows through estoppl.
 
+![Estoppl Dashboard](docs/dashboard.png)
+
 ## What the audit log looks like
 
 ```
