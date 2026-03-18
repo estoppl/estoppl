@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Estoppl Dashboard</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f8f9fa; color: #1a1a2e; }
+  .header { background: #1a1a2e; color: white; padding: 1.25rem 2rem; display: flex; align-items: center; justify-content: space-between; }
+  .header h1 { font-size: 1.25rem; font-weight: 600; }
+  .header .status { font-size: 0.8rem; color: #a0a0b0; }
+  .header .status.live { color: #4ade80; }
+  .tabs { background: white; border-bottom: 1px solid #e5e7eb; display: flex; padding: 0 2rem; }
+  .tab { padding: 0.75rem 1.25rem; cursor: pointer; font-size: 0.85rem; color: #666; border-bottom: 2px solid transparent; }
+  .tab:hover { color: #1a1a2e; }
+  .tab.active { color: #1a1a2e; border-bottom-color: #1a1a2e; font-weight: 600; }
+  .content { max-width: 1100px; margin: 1.5rem auto; padding: 0 2rem; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+  .card { background: white; border-radius: 8px; padding: 1.25rem; border: 1px solid #e5e7eb; }
+  .card .value { font-size: 2rem; font-weight: 700; color: #1a1a2e; }
+  .card .label { font-size: 0.75rem; color: #999; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 0.25rem; }
+  .panel { background: white; border-radius: 8px; border: 1px solid #e5e7eb; margin-bottom: 1.5rem; overflow: hidden; }
+  .panel-header { padding: 1rem 1.25rem; border-bottom: 1px solid #e5e7eb; font-weight: 600; font-size: 0.9rem; display: flex; align-items: center; justify-content: space-between; }
+  .filters { display: flex; gap: 0.75rem; align-items: center; }
+  .filters input, .filters select { padding: 0.35rem 0.5rem; border: 1px solid #d1d5db; border-radius: 4px; font-size: 0.8rem; }
+  .filters input { width: 140px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; padding: 0.6rem 1rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: #999; background: #fafafa; }
+  td { padding: 0.5rem 1rem; border-top: 1px solid #f3f4f6; font-size: 0.8rem; }
+  .mono { font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 0.75rem; }
+  .badge { padding: 2px 8px; border-radius: 3px; font-size: 0.7rem; font-weight: 600; display: inline-block; }
+  .badge.allow { background: #d1e7dd; color: #0f5132; }
+  .badge.block { background: #f8d7da; color: #842029; }
+  .badge.human { background: #fff3cd; color: #664d03; }
+  .latency { display: flex; gap: 2rem; padding: 1rem 1.25rem; }
+  .latency .item { text-align: center; }
+  .latency .item .val { font-size: 1.25rem; font-weight: 700; }
+  .latency .item .lbl { font-size: 0.7rem; color: #999; text-transform: uppercase; }
+  .chain-ok { color: #0f5132; font-weight: 600; }
+  .chain-broken { color: #842029; font-weight: 600; }
+  .chain-info { padding: 1.5rem; text-align: center; }
+  .chain-info .icon { font-size: 3rem; margin-bottom: 0.5rem; }
+  .chain-info .msg { font-size: 1.1rem; font-weight: 600; }
+  .chain-info .detail { font-size: 0.85rem; color: #666; margin-top: 0.5rem; }
+  .issues { padding: 1rem 1.25rem; }
+  .issues li { font-size: 0.8rem; color: #842029; margin-bottom: 0.25rem; }
+  .empty { padding: 3rem; text-align: center; color: #999; font-size: 0.9rem; }
+  .view { display: none; }
+  .view.active { display: block; }
+  .btn { padding: 0.35rem 0.75rem; background: #1a1a2e; color: white; border: none; border-radius: 4px; font-size: 0.75rem; cursor: pointer; }
+  .btn:hover { background: #2a2a4e; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>Estoppl Dashboard</h1>
+  <div class="status" id="status">Connecting...</div>
+</div>
+
+<div class="tabs">
+  <div class="tab active" data-view="overview">Overview</div>
+  <div class="tab" data-view="events">Events</div>
+  <div class="tab" data-view="tools">Tools</div>
+  <div class="tab" data-view="chain">Chain Status</div>
+</div>
+
+<div class="content">
+  <!-- Overview -->
+  <div class="view active" id="view-overview">
+    <div class="cards">
+      <div class="card"><div class="value" id="stat-total">-</div><div class="label">Total Events</div></div>
+      <div class="card"><div class="value" id="stat-allowed">-</div><div class="label">Allowed</div></div>
+      <div class="card"><div class="value" id="stat-blocked">-</div><div class="label">Blocked</div></div>
+      <div class="card"><div class="value" id="stat-human">-</div><div class="label">Human Review</div></div>
+      <div class="card"><div class="value" id="stat-tools">-</div><div class="label">Unique Tools</div></div>
+      <div class="card"><div class="value" id="stat-agents">-</div><div class="label">Unique Agents</div></div>
+    </div>
+    <div class="panel">
+      <div class="panel-header">Latency (allowed calls)</div>
+      <div class="latency">
+        <div class="item"><div class="val" id="lat-p50">-</div><div class="lbl">p50</div></div>
+        <div class="item"><div class="val" id="lat-p90">-</div><div class="lbl">p90</div></div>
+        <div class="item"><div class="val" id="lat-p99">-</div><div class="lbl">p99</div></div>
+        <div class="item"><div class="val" id="lat-max">-</div><div class="lbl">max</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Events -->
+  <div class="view" id="view-events">
+    <div class="panel">
+      <div class="panel-header">
+        <span>Event Log</span>
+        <div class="filters">
+          <input type="text" id="filter-tool" placeholder="Tool name">
+          <select id="filter-decision">
+            <option value="">All decisions</option>
+            <option value="ALLOW">Allow</option>
+            <option value="BLOCK">Block</option>
+            <option value="HUMAN_REQUIRED">Human Review</option>
+          </select>
+          <button class="btn" onclick="loadEvents()">Filter</button>
+        </div>
+      </div>
+      <div id="events-table"></div>
+    </div>
+  </div>
+
+  <!-- Tools -->
+  <div class="view" id="view-tools">
+    <div class="panel">
+      <div class="panel-header">Per-Tool Breakdown</div>
+      <div id="tools-table"></div>
+    </div>
+  </div>
+
+  <!-- Chain -->
+  <div class="view" id="view-chain">
+    <div class="panel">
+      <div class="panel-header">Hash Chain Verification</div>
+      <div id="chain-result"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Tab switching
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('view-' + tab.dataset.view).classList.add('active');
+
+    if (tab.dataset.view === 'events') loadEvents();
+    if (tab.dataset.view === 'tools') loadTools();
+    if (tab.dataset.view === 'chain') loadChain();
+  });
+});
+
+function decisionBadge(d) {
+  const cls = d === 'ALLOW' ? 'allow' : d === 'BLOCK' ? 'block' : 'human';
+  return '<span class="badge ' + cls + '">' + d + '</span>';
+}
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+async function loadStats() {
+  try {
+    const r = await fetch('/api/stats');
+    const d = await r.json();
+    document.getElementById('stat-total').textContent = d.summary.total_events;
+    document.getElementById('stat-allowed').textContent = d.summary.allowed;
+    document.getElementById('stat-blocked').textContent = d.summary.blocked;
+    document.getElementById('stat-human').textContent = d.summary.human_required;
+    document.getElementById('stat-tools').textContent = d.summary.unique_tools;
+    document.getElementById('stat-agents').textContent = d.summary.unique_agents;
+    document.getElementById('lat-p50').textContent = d.latency.p50 + 'ms';
+    document.getElementById('lat-p90').textContent = d.latency.p90 + 'ms';
+    document.getElementById('lat-p99').textContent = d.latency.p99 + 'ms';
+    document.getElementById('lat-max').textContent = d.latency.max + 'ms';
+    document.getElementById('status').textContent = 'Live';
+    document.getElementById('status').className = 'status live';
+  } catch (e) {
+    document.getElementById('status').textContent = 'Disconnected';
+    document.getElementById('status').className = 'status';
+  }
+}
+
+async function loadEvents() {
+  const tool = document.getElementById('filter-tool').value;
+  const decision = document.getElementById('filter-decision').value;
+  let url = '/api/events?limit=100';
+  if (tool) url += '&tool=' + encodeURIComponent(tool);
+  if (decision) url += '&decision=' + encodeURIComponent(decision);
+
+  try {
+    const r = await fetch(url);
+    const events = await r.json();
+    if (events.length === 0) {
+      document.getElementById('events-table').innerHTML = '<div class="empty">No events found.</div>';
+      return;
+    }
+    let html = '<table><thead><tr><th>Event ID</th><th>Tool</th><th>Decision</th><th>Timestamp</th><th>Latency</th></tr></thead><tbody>';
+    events.forEach(e => {
+      const ts = e.timestamp.replace('T', ' ').substring(0, 19);
+      html += '<tr><td class="mono">' + esc(e.event_id.substring(0, 8)) + '</td><td>' + esc(e.tool_name) + '</td><td>' + decisionBadge(e.policy_decision) + '</td><td>' + ts + '</td><td>' + e.latency_ms + 'ms</td></tr>';
+    });
+    html += '</tbody></table>';
+    document.getElementById('events-table').innerHTML = html;
+  } catch (e) {
+    document.getElementById('events-table').innerHTML = '<div class="empty">Failed to load events.</div>';
+  }
+}
+
+async function loadTools() {
+  try {
+    const r = await fetch('/api/tools');
+    const tools = await r.json();
+    if (tools.length === 0) {
+      document.getElementById('tools-table').innerHTML = '<div class="empty">No tool data yet.</div>';
+      return;
+    }
+    let html = '<table><thead><tr><th>Tool</th><th>Calls</th><th>Allowed</th><th>Blocked</th><th>Human</th><th>Avg Latency</th></tr></thead><tbody>';
+    tools.forEach(t => {
+      html += '<tr><td>' + esc(t.tool_name) + '</td><td>' + t.call_count + '</td><td>' + t.allowed + '</td><td>' + t.blocked + '</td><td>' + t.human_required + '</td><td>' + t.avg_latency_ms.toFixed(1) + 'ms</td></tr>';
+    });
+    html += '</tbody></table>';
+    document.getElementById('tools-table').innerHTML = html;
+  } catch (e) {
+    document.getElementById('tools-table').innerHTML = '<div class="empty">Failed to load tools.</div>';
+  }
+}
+
+async function loadChain() {
+  try {
+    const r = await fetch('/api/verify');
+    const d = await r.json();
+    if (d.intact) {
+      document.getElementById('chain-result').innerHTML = '<div class="chain-info"><div class="chain-ok icon">&#10003;</div><div class="chain-ok msg">Hash Chain INTACT</div><div class="detail">' + d.total + ' events verified</div></div>';
+    } else {
+      let issues = '<ul class="issues">' + d.issues.map(i => '<li>' + esc(i) + '</li>').join('') + '</ul>';
+      document.getElementById('chain-result').innerHTML = '<div class="chain-info"><div class="chain-broken icon">&#10007;</div><div class="chain-broken msg">Hash Chain BROKEN</div><div class="detail">' + d.issues.length + ' issues found in ' + d.total + ' events</div></div>' + issues;
+    }
+  } catch (e) {
+    document.getElementById('chain-result').innerHTML = '<div class="empty">Failed to verify chain.</div>';
+  }
+}
+
+// Initial load and auto-refresh
+loadStats();
+setInterval(loadStats, 5000);
+</script>
+</body>
+</html>

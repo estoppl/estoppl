@@ -547,6 +547,7 @@ impl LocalLedger {
     }
 }
 
+#[derive(serde::Serialize)]
 pub struct ReportStats {
     pub total_events: u64,
     pub allowed: u64,
@@ -558,6 +559,7 @@ pub struct ReportStats {
     pub last_event: Option<String>,
 }
 
+#[derive(serde::Serialize)]
 pub struct ToolStats {
     pub tool_name: String,
     pub call_count: u64,
@@ -565,12 +567,11 @@ pub struct ToolStats {
     pub blocked: u64,
     pub human_required: u64,
     pub avg_latency_ms: f64,
-    #[allow(dead_code)]
     pub min_latency_ms: i64,
-    #[allow(dead_code)]
     pub max_latency_ms: i64,
 }
 
+#[derive(serde::Serialize)]
 pub struct LatencyStats {
     pub p50: i64,
     pub p90: i64,
@@ -578,6 +579,7 @@ pub struct LatencyStats {
     pub max: i64,
 }
 
+#[derive(serde::Serialize)]
 pub struct SessionStats {
     pub session_id: String,
     pub agent_id: String,

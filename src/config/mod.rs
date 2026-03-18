@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-/// Top-level configuration for estoppl-proxy.
+/// Top-level configuration for estoppl.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyConfig {
     pub agent: AgentConfig,

@@ -245,6 +245,60 @@ fn test_help_output() {
     assert!(stdout.contains("report"));
     assert!(stdout.contains("tail"));
     assert!(stdout.contains("stats"));
+    assert!(stdout.contains("wrap"));
+    assert!(stdout.contains("unwrap"));
+    assert!(stdout.contains("dashboard"));
+}
+
+#[test]
+fn test_wrap_dry_run() {
+    let dir = tempfile::TempDir::new().unwrap();
+
+    // Create a fake MCP client config
+    let config_dir = dir.path().join("fake-client");
+    std::fs::create_dir_all(&config_dir).unwrap();
+    let config_path = config_dir.join("mcp.json");
+    std::fs::write(
+        &config_path,
+        r#"{
+            "mcpServers": {
+                "stripe": {
+                    "command": "npx",
+                    "args": ["@stripe/mcp-server"]
+                }
+            }
+        }"#,
+    )
+    .unwrap();
+
+    // wrap --dry-run shouldn't modify the file
+    let output = Command::new(estoppl_bin())
+        .args(["wrap", "--dry-run"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+
+    // Original file should be unchanged
+    let content = std::fs::read_to_string(&config_path).unwrap();
+    assert!(content.contains("\"command\": \"npx\"") || content.contains("\"command\":\"npx\""));
+}
+
+#[test]
+fn test_wrap_no_configs_found() {
+    let dir = tempfile::TempDir::new().unwrap();
+
+    let output = Command::new(estoppl_bin())
+        .args(["wrap"])
+        .current_dir(dir.path())
+        .env("HOME", dir.path().to_str().unwrap())
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success());
+    assert!(stdout.contains("No MCP client configs found"));
 }
 
 #[test]

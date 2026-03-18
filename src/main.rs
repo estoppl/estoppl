@@ -1,4 +1,5 @@
 mod config;
+mod dashboard;
 mod identity;
 mod ledger;
 mod mcp;
@@ -6,6 +7,7 @@ mod policy;
 mod proxy;
 mod report;
 mod sync;
+mod wrap;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -120,6 +122,39 @@ enum Commands {
         #[arg(long, short, default_value = "estoppl.toml")]
         config: PathBuf,
     },
+
+    /// Auto-wrap existing MCP client configs to route through estoppl.
+    Wrap {
+        /// Preview changes without modifying files.
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Restore original configs from backup.
+        #[arg(long)]
+        restore: bool,
+
+        /// Only wrap a specific client (claude, cursor, windsurf).
+        #[arg(long)]
+        client: Option<String>,
+    },
+
+    /// Restore original MCP client configs (alias for `wrap --restore`).
+    Unwrap {
+        /// Only unwrap a specific client (claude, cursor, windsurf).
+        #[arg(long)]
+        client: Option<String>,
+    },
+
+    /// Open the local web dashboard for browsing audit events.
+    Dashboard {
+        /// Port to serve the dashboard on.
+        #[arg(long, default_value = "4200")]
+        port: u16,
+
+        /// Path to estoppl config file.
+        #[arg(long, short, default_value = "estoppl.toml")]
+        config: PathBuf,
+    },
 }
 
 #[tokio::main]
@@ -160,6 +195,13 @@ async fn main() -> Result<()> {
         } => cmd_audit(limit, verify, tool, decision, since, &config)?,
         Commands::Tail { config } => cmd_tail(&config).await?,
         Commands::Stats { config } => cmd_stats(&config)?,
+        Commands::Wrap {
+            dry_run,
+            restore,
+            client,
+        } => wrap::run_wrap(dry_run, restore, client.as_deref())?,
+        Commands::Unwrap { client } => wrap::run_wrap(false, true, client.as_deref())?,
+        Commands::Dashboard { port, config } => cmd_dashboard(port, &config).await?,
     }
 
     Ok(())
@@ -409,6 +451,11 @@ async fn cmd_tail(config_path: &Path) -> Result<()> {
 
         last_rowid = new_rowid;
     }
+}
+
+async fn cmd_dashboard(port: u16, config_path: &Path) -> Result<()> {
+    let config = config::ProxyConfig::load(config_path)?;
+    dashboard::run_dashboard(port, config.ledger.db_path).await
 }
 
 fn cmd_stats(config_path: &Path) -> Result<()> {

@@ -72,8 +72,16 @@ impl PolicyEngine {
     }
 
     /// Evaluate a tool call against the configured rules.
+    ///
+    /// Evaluation order:
+    /// 1. Block list — always blocked, even if also in allow list
+    /// 2. Allow list — if non-empty, only listed tools are allowed (everything else is blocked)
+    /// 3. Human review list
+    /// 4. Amount threshold
+    /// 5. Rate limits
+    /// 6. Default: allow
     pub fn evaluate(&self, tool_call: &ToolCallParams) -> PolicyDecision {
-        // Check explicit block list first.
+        // Check explicit block list first (highest priority).
         if self
             .rules
             .block_tools
@@ -82,6 +90,19 @@ impl PolicyEngine {
         {
             return PolicyDecision::Block {
                 rule: format!("block_tools:{}", tool_call.name),
+            };
+        }
+
+        // Check allow list — if non-empty, only listed tools pass through.
+        if !self.rules.allow_tools.is_empty()
+            && !self
+                .rules
+                .allow_tools
+                .iter()
+                .any(|t| tool_matches(&tool_call.name, t))
+        {
+            return PolicyDecision::Block {
+                rule: format!("allow_tools:not_listed:{}", tool_call.name),
             };
         }
 
@@ -244,6 +265,101 @@ mod tests {
     #[test]
     fn test_allow_by_default() {
         let engine = PolicyEngine::new(make_rules());
+        let call = ToolCallParams {
+            name: "read_portfolio".into(),
+            arguments: serde_json::json!({}),
+        };
+        assert_eq!(engine.evaluate(&call), PolicyDecision::Allow);
+    }
+
+    #[test]
+    fn test_allow_list_permits_listed_tools() {
+        let mut rules = make_rules();
+        rules.allow_tools = vec!["read_portfolio".into(), "get_balance".into()];
+        rules.block_tools = vec![]; // clear block list for this test
+        let engine = PolicyEngine::new(rules);
+
+        let allowed = ToolCallParams {
+            name: "read_portfolio".into(),
+            arguments: serde_json::json!({}),
+        };
+        assert_eq!(engine.evaluate(&allowed), PolicyDecision::Allow);
+
+        let also_allowed = ToolCallParams {
+            name: "get_balance".into(),
+            arguments: serde_json::json!({}),
+        };
+        assert_eq!(engine.evaluate(&also_allowed), PolicyDecision::Allow);
+    }
+
+    #[test]
+    fn test_allow_list_blocks_unlisted_tools() {
+        let mut rules = make_rules();
+        rules.allow_tools = vec!["read_portfolio".into()];
+        rules.block_tools = vec![];
+        let engine = PolicyEngine::new(rules);
+
+        let blocked = ToolCallParams {
+            name: "send_payment".into(),
+            arguments: serde_json::json!({}),
+        };
+        assert!(matches!(
+            engine.evaluate(&blocked),
+            PolicyDecision::Block { .. }
+        ));
+    }
+
+    #[test]
+    fn test_allow_list_with_wildcards() {
+        let mut rules = make_rules();
+        rules.allow_tools = vec!["read.*".into()];
+        rules.block_tools = vec![];
+        let engine = PolicyEngine::new(rules);
+
+        let allowed = ToolCallParams {
+            name: "read.portfolio".into(),
+            arguments: serde_json::json!({}),
+        };
+        assert_eq!(engine.evaluate(&allowed), PolicyDecision::Allow);
+
+        let blocked = ToolCallParams {
+            name: "write.portfolio".into(),
+            arguments: serde_json::json!({}),
+        };
+        assert!(matches!(
+            engine.evaluate(&blocked),
+            PolicyDecision::Block { .. }
+        ));
+    }
+
+    #[test]
+    fn test_block_list_overrides_allow_list() {
+        let mut rules = make_rules();
+        rules.allow_tools = vec!["stripe.*".into()];
+        rules.block_tools = vec!["stripe.delete_account".into()];
+        let engine = PolicyEngine::new(rules);
+
+        let allowed = ToolCallParams {
+            name: "stripe.create_payment".into(),
+            arguments: serde_json::json!({}),
+        };
+        assert_eq!(engine.evaluate(&allowed), PolicyDecision::Allow);
+
+        let blocked = ToolCallParams {
+            name: "stripe.delete_account".into(),
+            arguments: serde_json::json!({}),
+        };
+        assert!(matches!(
+            engine.evaluate(&blocked),
+            PolicyDecision::Block { .. }
+        ));
+    }
+
+    #[test]
+    fn test_empty_allow_list_allows_everything() {
+        let rules = make_rules(); // allow_tools is empty by default
+        let engine = PolicyEngine::new(rules);
+
         let call = ToolCallParams {
             name: "read_portfolio".into(),
             arguments: serde_json::json!({}),
