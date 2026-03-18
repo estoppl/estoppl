@@ -128,6 +128,44 @@ All stored under `.estoppl/` in the working directory:
 - `.estoppl/keys/estoppl-signing.pub` — Ed25519 public key
 - `.estoppl/events.db` — SQLite database with audit events
 
+## Vision: trust layer for AI agent tool calls
+
+The long-term architecture positions estoppl as a trust layer between AI agents and API providers — analogous to how Visa sits between cardholders and merchants.
+
+Today, estoppl is a local proxy: it logs and enforces guardrails, but the upstream API provider doesn't know estoppl exists. The next evolution adds **attestation and verification**, making estoppl required by both sides.
+
+### How it works
+
+```
+Agent → estoppl proxy → [attestation ID] → API Provider (MCP Server)
+            ↓                                       ↓
+        syncs event                          calls estoppl cloud:
+        to cloud ledger                      "verify this attestation"
+            ↓                                       ↓
+        estoppl cloud ◀─────────────────── "valid: agent=treasury-bot,
+        (WORM, hash-chained)                 user=alice@acme.com,
+                                             decision=ALLOW, chain=intact"
+```
+
+1. Agent makes a tool call — estoppl proxy intercepts, evaluates policy, logs the event
+2. Event syncs to the estoppl cloud ledger (tamper-proof, hash-chained)
+3. Proxy forwards the call with an attestation ID header
+4. API provider calls `api.estoppl.com/verify/{attestation_id}` to verify
+5. Cloud confirms the event exists, the chain is intact, and the policy was evaluated
+6. API provider proceeds or rejects
+
+### Why cloud verification is required
+
+A local-only signature can be forged — the agent operator controls the signing key. The cloud is the neutral third party neither side controls, which is why both sides can trust it. This is the same trust model as payment networks: the merchant doesn't trust the cardholder's signature, they call the network.
+
+### Phases
+
+- **Phase 1 (current)**: OSS proxy with local logging, signing, and guardrails
+- **Phase 2**: Attestation header added to forwarded requests (self-contained, signed)
+- **Phase 3**: Cloud verification API — API providers verify attestations against the cloud ledger
+- **Phase 4**: API providers require estoppl attestation for high-risk operations
+- **Phase 5**: Registry and network effects — public key directory, cross-org trust
+
 ## Build and test
 
 ```bash

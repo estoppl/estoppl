@@ -214,11 +214,15 @@ Events always persist locally first. Cloud sync is best-effort with exponential 
 - [x] Distribution: Homebrew, npm, Cargo, GitHub Releases
 
 ### Future
+- [ ] **Attestation header** — signed proof of policy evaluation forwarded with each tool call
+- [ ] **Cloud verification API** — API providers verify attestations against the tamper-proof cloud ledger
+- [ ] **Cloud dashboard** with real-time alerting
+- [ ] **Immutable WORM storage** for regulated industries (SEC 17a-4)
 - [ ] Blocking human review — tools pause until explicit approval
-- [ ] Cloud dashboard with real-time alerting
-- [ ] Immutable WORM storage for regulated industries (SEC 17a-4)
 - [ ] OPA integration for enterprise policy management
 - [ ] OpenAI function calling + A2A protocol interception
+
+The long-term vision: estoppl becomes the trust layer for AI agent tool calls — API providers require estoppl attestation before processing high-risk operations, the same way merchants require Visa before processing a payment. See [ARCHITECTURE.md](ARCHITECTURE.md) for details.
 
 ## For regulated teams
 
