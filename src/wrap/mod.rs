@@ -14,6 +14,7 @@ fn detect_clients() -> Vec<McpClient> {
         Err(_) => return vec![],
     };
 
+    #[allow(unused_mut)]
     let mut clients = vec![
         McpClient {
             name: "Cursor",
