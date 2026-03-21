@@ -343,9 +343,13 @@ fn maybe_start_sync(
 
     tracing::info!(endpoint = sync_config.endpoint, "Cloud sync enabled");
 
-    let (_shutdown_tx, shutdown_rx) = sync::shutdown_channel();
+    let (shutdown_tx, shutdown_rx) = sync::shutdown_channel();
     let syncer = sync::CloudSyncer::new(sync_config, config.ledger.db_path.clone(), shutdown_rx);
     let handle = syncer.spawn();
+
+    // Keep shutdown_tx alive so the syncer loop doesn't exit.
+    // It will be dropped when the process exits.
+    std::mem::forget(shutdown_tx);
 
     Ok(Some(handle))
 }
@@ -391,9 +395,12 @@ fn maybe_start_policy_sync(
 
     tracing::info!(endpoint = policy_endpoint, "Policy sync enabled");
 
-    let (_shutdown_tx, shutdown_rx) = sync::shutdown_channel();
+    let (shutdown_tx, shutdown_rx) = sync::shutdown_channel();
     let syncer = sync::PolicySyncer::new(policy_config, policy_engine, shutdown_rx);
     let handle = syncer.spawn();
+
+    // Keep shutdown_tx alive so the policy syncer loop doesn't exit.
+    std::mem::forget(shutdown_tx);
 
     Ok(Some(handle))
 }
