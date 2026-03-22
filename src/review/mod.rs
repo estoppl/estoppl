@@ -85,7 +85,8 @@ impl ReviewClient {
             anyhow::bail!("Poll review failed: {}", resp.status());
         }
 
-        let body: ReviewStatusResponse = resp.json().await.context("Failed to parse review status")?;
+        let body: ReviewStatusResponse =
+            resp.json().await.context("Failed to parse review status")?;
         Ok(body.status)
     }
 

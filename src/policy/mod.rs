@@ -130,20 +130,14 @@ impl PolicyEngine {
             .or(rules.human_review_above_usd);
 
         // Check explicit block list first (highest priority).
-        if block_tools
-            .iter()
-            .any(|t| tool_matches(&tool_call.name, t))
-        {
+        if block_tools.iter().any(|t| tool_matches(&tool_call.name, t)) {
             return PolicyDecision::Block {
                 rule: format!("block_tools:{}", tool_call.name),
             };
         }
 
         // Check allow list — if non-empty, only listed tools pass through.
-        if !allow_tools.is_empty()
-            && !allow_tools
-                .iter()
-                .any(|t| tool_matches(&tool_call.name, t))
+        if !allow_tools.is_empty() && !allow_tools.iter().any(|t| tool_matches(&tool_call.name, t))
         {
             return PolicyDecision::Block {
                 rule: format!("allow_tools:not_listed:{}", tool_call.name),
@@ -157,14 +151,10 @@ impl PolicyEngine {
         {
             // If human_review_above_usd is set, only require review above that amount.
             if let Some(threshold) = human_review_above {
-                if let Some(amount) =
-                    extract_amount(&tool_call.arguments, &rules.amount_field)
-                {
+                if let Some(amount) = extract_amount(&tool_call.arguments, &rules.amount_field) {
                     if amount > threshold {
                         return PolicyDecision::HumanRequired {
-                            rule: format!(
-                                "human_review_above_usd:{}>{}", amount, threshold
-                            ),
+                            rule: format!("human_review_above_usd:{}>{}", amount, threshold),
                         };
                     }
                     // Below threshold — skip human review, continue to other checks
@@ -299,7 +289,11 @@ fn evaluate_condition(condition: &RuleCondition, args: &serde_json::Value) -> bo
 }
 
 /// Compare two JSON values as f64 using the given comparison function.
-fn compare_numbers(a: &serde_json::Value, b: &serde_json::Value, cmp: fn(f64, f64) -> bool) -> bool {
+fn compare_numbers(
+    a: &serde_json::Value,
+    b: &serde_json::Value,
+    cmp: fn(f64, f64) -> bool,
+) -> bool {
     match (a.as_f64(), b.as_f64()) {
         (Some(a), Some(b)) => cmp(a, b),
         _ => false,

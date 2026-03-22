@@ -453,7 +453,7 @@ impl LocalLedger {
             tool_server: row.get(7)?,
             input_hash: row.get(8)?,
             output_hash: row.get(9)?,
-            input_data: None,  // Not stored in local SQLite — only synced to cloud
+            input_data: None, // Not stored in local SQLite — only synced to cloud
             output_data: None,
             policy_decision: row.get(10)?,
             policy_rule: row.get(11)?,

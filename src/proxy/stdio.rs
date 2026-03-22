@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
-use futures::stream::FuturesUnordered;
 use futures::StreamExt;
+use futures::stream::FuturesUnordered;
 use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -25,7 +25,10 @@ fn redact_fields(value: &serde_json::Value, fields: &[String]) -> serde_json::Va
             let mut redacted = serde_json::Map::new();
             for (k, v) in map {
                 if fields.iter().any(|f| f == k) {
-                    redacted.insert(k.clone(), serde_json::Value::String("[REDACTED]".to_string()));
+                    redacted.insert(
+                        k.clone(),
+                        serde_json::Value::String("[REDACTED]".to_string()),
+                    );
                 } else {
                     redacted.insert(k.clone(), redact_fields(v, fields));
                 }
@@ -106,12 +109,18 @@ pub async fn run_stdio_proxy(
     let mut stdin_closed = false;
 
     // Track in-flight human review waits.
-    type ReviewFuture = std::pin::Pin<Box<dyn std::future::Future<Output = (
-        Result<ReviewOutcome>,
-        String, // held_request
-        Option<serde_json::Value>, // req_id
-        String, // tool_name
-    )> + Send>>;
+    type ReviewFuture = std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = (
+                        Result<ReviewOutcome>,
+                        String,                    // held_request
+                        Option<serde_json::Value>, // req_id
+                        String,                    // tool_name
+                    ),
+                > + Send,
+        >,
+    >;
     let mut review_futures: FuturesUnordered<ReviewFuture> = FuturesUnordered::new();
 
     loop {
