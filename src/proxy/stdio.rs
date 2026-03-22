@@ -42,6 +42,7 @@ fn redact_fields(value: &serde_json::Value, fields: &[String]) -> serde_json::Va
 /// Tracks an in-flight tools/call request so we can log the response too.
 struct PendingCall {
     tool_name: String,
+    event_id: String,
     start: std::time::Instant,
 }
 
@@ -117,6 +118,7 @@ pub async fn run_stdio_proxy(
                         String,                    // held_request
                         Option<serde_json::Value>, // req_id
                         String,                    // tool_name
+                        String,                    // event_id
                     ),
                 > + Send,
         >,
@@ -189,20 +191,14 @@ pub async fn run_stdio_proxy(
 
                             // Log the blocked call immediately.
                             super::log_event(
-                                ledger,
-                                key_manager,
-                                &session_id,
-                                agent_id,
-                                agent_version,
-                                authorized_by,
-                                &tool_name,
-                                "stdio",
-                                &input_hash,
-                                "",
-                                input_data.clone(),
-                                None,
-                                &decision,
-                                0,
+                                ledger, key_manager, &session_id,
+                                agent_id, agent_version, authorized_by,
+                                super::EventParams {
+                                    tool_name: &tool_name, tool_server: "stdio",
+                                    input_hash: &input_hash, output_hash: "",
+                                    input_data: input_data.clone(), output_data: None,
+                                    decision: &decision, latency_ms: 0,
+                                },
                             )?;
 
                             host_stdout.write_all(err_json.as_bytes()).await?;
@@ -215,20 +211,14 @@ pub async fn run_stdio_proxy(
                         PolicyDecision::HumanRequired { .. } if review_client.is_some() => {
                             // Hold the call — don't forward until human approves.
                             let event_id = super::log_event(
-                                ledger,
-                                key_manager,
-                                &session_id,
-                                agent_id,
-                                agent_version,
-                                authorized_by,
-                                &tool_name,
-                                "stdio",
-                                &input_hash,
-                                "",
-                                input_data.clone(),
-                                None,
-                                &decision,
-                                0,
+                                ledger, key_manager, &session_id,
+                                agent_id, agent_version, authorized_by,
+                                super::EventParams {
+                                    tool_name: &tool_name, tool_server: "stdio",
+                                    input_hash: &input_hash, output_hash: "",
+                                    input_data: input_data.clone(), output_data: None,
+                                    decision: &decision, latency_ms: 0,
+                                },
                             )?;
 
                             tracing::info!(
@@ -260,7 +250,7 @@ pub async fn run_stdio_proxy(
                                     Duration::from_secs(2),
                                 ).await;
 
-                                (outcome, held_request, req_id, tn)
+                                (outcome, held_request, req_id, tn, event_id)
                             }));
 
                             host_line.clear();
@@ -274,27 +264,22 @@ pub async fn run_stdio_proxy(
                                 );
                             }
 
-                            let _event_id = super::log_event(
-                                ledger,
-                                key_manager,
-                                &session_id,
-                                agent_id,
-                                agent_version,
-                                authorized_by,
-                                &tool_name,
-                                "stdio",
-                                &input_hash,
-                                "",
-                                input_data.clone(),
-                                None,
-                                &decision,
-                                0,
+                            let event_id = super::log_event(
+                                ledger, key_manager, &session_id,
+                                agent_id, agent_version, authorized_by,
+                                super::EventParams {
+                                    tool_name: &tool_name, tool_server: "stdio",
+                                    input_hash: &input_hash, output_hash: "",
+                                    input_data: input_data.clone(), output_data: None,
+                                    decision: &decision, latency_ms: 0,
+                                },
                             )?;
 
                             pending.insert(
                                 req_id_key,
                                 PendingCall {
                                     tool_name,
+                                    event_id,
                                     start: std::time::Instant::now(),
                                 },
                             );
@@ -331,6 +316,27 @@ pub async fn run_stdio_proxy(
                     if let Some(call) = pending.remove(&resp_id_key) {
                         let latency_ms = call.start.elapsed().as_millis() as i64;
 
+                        // Update the event with response data (local + cloud)
+                        let output = resp.result.clone();
+                        if let Err(e) = ledger.update_event_output(
+                            &call.event_id,
+                            output.clone(),
+                        ) {
+                            tracing::warn!(error = %e, "Failed to update local event with response");
+                        }
+
+                        // Send output_data to cloud
+                        if let Some(ref rc) = review_client {
+                            let eid = call.event_id.clone();
+                            let rc = Arc::clone(rc);
+                            let out = output.clone();
+                            tokio::spawn(async move {
+                                if let Err(e) = rc.update_event_output(&eid, out).await {
+                                    tracing::warn!(error = %e, "Failed to sync response to cloud");
+                                }
+                            });
+                        }
+
                         tracing::info!(
                             tool = call.tool_name,
                             latency_ms = latency_ms,
@@ -346,7 +352,7 @@ pub async fn run_stdio_proxy(
             }
 
             // Check for completed human review decisions.
-            Some((outcome, held_request, req_id, tool_name)) = review_futures.next() => {
+            Some((outcome, held_request, req_id, tool_name, evt_id)) = review_futures.next() => {
                 match outcome {
                     Ok(ReviewOutcome::Approved) => {
                         tracing::info!(tool = tool_name, "Human review APPROVED — forwarding");
@@ -357,6 +363,7 @@ pub async fn run_stdio_proxy(
                         let req_id_key = req_id.map(|v| v.to_string()).unwrap_or_default();
                         pending.insert(req_id_key, PendingCall {
                             tool_name,
+                            event_id: evt_id,
                             start: std::time::Instant::now(),
                         });
                     }

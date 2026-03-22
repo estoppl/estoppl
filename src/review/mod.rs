@@ -90,6 +90,37 @@ impl ReviewClient {
         Ok(body.status)
     }
 
+    /// Send output_data to the cloud for an event that already synced.
+    pub async fn update_event_output(
+        &self,
+        event_id: &str,
+        output_data: Option<serde_json::Value>,
+    ) -> Result<()> {
+        let url = format!("{}/v1/events/{}/output", self.base_url, event_id);
+
+        let payload = serde_json::json!({
+            "output_data": output_data,
+        });
+
+        let mut req = self
+            .http_client
+            .put(&url)
+            .header("Content-Type", "application/json")
+            .json(&payload);
+
+        if let Some(key) = &self.api_key {
+            req = req.header("Authorization", format!("Bearer {}", key));
+        }
+
+        let resp = req.send().await.context("Failed to update event output")?;
+        if !resp.status().is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("Update event output failed: {}", body);
+        }
+
+        Ok(())
+    }
+
     /// Block until the review is decided or times out.
     pub async fn wait_for_decision(
         &self,

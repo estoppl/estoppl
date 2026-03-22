@@ -40,16 +40,7 @@ struct ProxyState {
 }
 
 impl ProxyState {
-    fn log_event(
-        &self,
-        tool_name: &str,
-        input_hash: &str,
-        output_hash: &str,
-        input_data: Option<serde_json::Value>,
-        output_data: Option<serde_json::Value>,
-        decision: &PolicyDecision,
-        latency_ms: i64,
-    ) {
+    fn log_event(&self, params: super::EventParams) {
         let ledger = self.ledger.lock().unwrap();
         match super::log_event(
             &ledger,
@@ -58,14 +49,7 @@ impl ProxyState {
             &self.agent_id,
             &self.agent_version,
             &self.authorized_by,
-            tool_name,
-            &self.upstream_url,
-            input_hash,
-            output_hash,
-            input_data,
-            output_data,
-            decision,
-            latency_ms,
+            params,
         ) {
             Ok(_event_id) => {}
             Err(e) => tracing::error!(error = %e, "Failed to log event"),
@@ -187,7 +171,16 @@ async fn handle_post(state: Arc<ProxyState>, headers: HeaderMap, body: Bytes) ->
 
             match &decision {
                 PolicyDecision::Block { rule } => {
-                    state.log_event(&tool_name, &input_hash, "", None, None, &decision, 0);
+                    state.log_event(super::EventParams {
+                        tool_name: &tool_name,
+                        tool_server: &state.upstream_url,
+                        input_hash: &input_hash,
+                        output_hash: "",
+                        input_data: None,
+                        output_data: None,
+                        decision: &decision,
+                        latency_ms: 0,
+                    });
 
                     blocked_responses.push(JsonRpcResponse::error(
                         req.id.clone(),
@@ -500,15 +493,16 @@ fn log_single_response(
         let output_hash = sha256_hex(resp_str.as_bytes());
         let latency_ms = call.start.elapsed().as_millis() as i64;
 
-        state.log_event(
-            &call.tool_name,
-            &call.input_hash,
-            &output_hash,
-            None, // TODO: capture input_data in TrackedCall
-            None, // TODO: capture output_data from response
-            &call.decision,
+        state.log_event(super::EventParams {
+            tool_name: &call.tool_name,
+            tool_server: &state.upstream_url,
+            input_hash: &call.input_hash,
+            output_hash: &output_hash,
+            input_data: None,
+            output_data: None,
+            decision: &call.decision,
             latency_ms,
-        );
+        });
 
         tracing::info!(
             tool = call.tool_name,

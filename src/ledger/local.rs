@@ -45,6 +45,8 @@ impl LocalLedger {
                 event_hash      TEXT NOT NULL,
                 signature       TEXT NOT NULL,
                 proxy_key_id    TEXT NOT NULL,
+                input_data      TEXT,
+                output_data     TEXT,
                 created_at      TEXT NOT NULL DEFAULT (datetime('now'))
             );
 
@@ -68,38 +70,83 @@ impl LocalLedger {
             INSERT OR IGNORE INTO sync_state (id, last_rowid) VALUES (1, 0);",
         )?;
 
+        // Migrate existing databases: add input_data/output_data columns if missing.
+        // SQLite doesn't support ALTER TABLE ADD COLUMN IF NOT EXISTS, so we ignore errors.
+        let _ = conn.execute("ALTER TABLE events ADD COLUMN input_data TEXT", []);
+        let _ = conn.execute("ALTER TABLE events ADD COLUMN output_data TEXT", []);
+
         Ok(Self { conn })
     }
 
     /// Append an event to the local ledger.
     pub fn append(&self, event: &AgentActionEvent) -> Result<()> {
+        let input_data_json = event
+            .input_data
+            .as_ref()
+            .map(|v| serde_json::to_string(v).unwrap_or_default());
+        let output_data_json = event
+            .output_data
+            .as_ref()
+            .map(|v| serde_json::to_string(v).unwrap_or_default());
+
         self.conn.execute(
             "INSERT INTO events (
                 event_id, agent_id, agent_version, authorized_by, session_id,
                 timestamp, tool_name, tool_server, input_hash, output_hash,
                 policy_decision, policy_rule, latency_ms, sequence_number,
-                prev_hash, event_hash, signature, proxy_key_id
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
-            rusqlite::params![
-                event.event_id,
-                event.agent_id,
-                event.agent_version,
-                event.authorized_by,
-                event.session_id,
-                event.timestamp.to_rfc3339(),
-                event.tool_name,
-                event.tool_server,
-                event.input_hash,
-                event.output_hash,
-                event.policy_decision,
-                event.policy_rule,
-                event.latency_ms,
-                event.sequence_number,
-                event.prev_hash,
-                event.event_hash,
-                event.signature,
-                event.proxy_key_id,
-            ],
+                prev_hash, event_hash, signature, proxy_key_id,
+                input_data, output_data
+            ) VALUES (
+                :event_id, :agent_id, :agent_version, :authorized_by, :session_id,
+                :timestamp, :tool_name, :tool_server, :input_hash, :output_hash,
+                :policy_decision, :policy_rule, :latency_ms, :sequence_number,
+                :prev_hash, :event_hash, :signature, :proxy_key_id,
+                :input_data, :output_data
+            )",
+            rusqlite::named_params! {
+                ":event_id": event.event_id,
+                ":agent_id": event.agent_id,
+                ":agent_version": event.agent_version,
+                ":authorized_by": event.authorized_by,
+                ":session_id": event.session_id,
+                ":timestamp": event.timestamp.to_rfc3339(),
+                ":tool_name": event.tool_name,
+                ":tool_server": event.tool_server,
+                ":input_hash": event.input_hash,
+                ":output_hash": event.output_hash,
+                ":policy_decision": event.policy_decision,
+                ":policy_rule": event.policy_rule,
+                ":latency_ms": event.latency_ms,
+                ":sequence_number": event.sequence_number,
+                ":prev_hash": event.prev_hash,
+                ":event_hash": event.event_hash,
+                ":signature": event.signature,
+                ":proxy_key_id": event.proxy_key_id,
+                ":input_data": input_data_json,
+                ":output_data": output_data_json,
+            },
+        )?;
+        Ok(())
+    }
+
+    /// Update an event with response data after the upstream replies.
+    /// Only updates output_data (not in hash chain) — output_hash and latency_ms
+    /// are part of the event hash and cannot be changed after signing.
+    pub fn update_event_output(
+        &self,
+        event_id: &str,
+        output_data: Option<serde_json::Value>,
+    ) -> Result<()> {
+        let output_data_json = output_data
+            .as_ref()
+            .map(|v| serde_json::to_string(v).unwrap_or_default());
+
+        self.conn.execute(
+            "UPDATE events SET output_data = :output_data WHERE event_id = :event_id",
+            rusqlite::named_params! {
+                ":output_data": output_data_json,
+                ":event_id": event_id,
+            },
         )?;
         Ok(())
     }
@@ -203,7 +250,7 @@ impl LocalLedger {
     /// Get events newer than the given rowid (for tail/streaming).
     pub fn events_after_rowid(&self, after_rowid: i64) -> Result<(Vec<AgentActionEvent>, i64)> {
         let sql = format!(
-            "SELECT {}, rowid FROM events WHERE rowid > ?1 ORDER BY rowid ASC",
+            "SELECT {}, rowid AS _rowid FROM events WHERE rowid > ?1 ORDER BY rowid ASC",
             Self::EVENT_COLUMNS,
         );
         let mut stmt = self.conn.prepare(&sql)?;
@@ -312,7 +359,7 @@ impl LocalLedger {
         let cursor = self.get_sync_cursor()?;
 
         let sql = format!(
-            "SELECT {}, rowid FROM events WHERE rowid > ?1 ORDER BY rowid ASC LIMIT ?2",
+            "SELECT {}, rowid AS _rowid FROM events WHERE rowid > ?1 ORDER BY rowid ASC LIMIT ?2",
             Self::EVENT_COLUMNS,
         );
         let mut stmt = self.conn.prepare(&sql)?;
@@ -320,7 +367,7 @@ impl LocalLedger {
         let mut max_rowid = cursor;
         let events: Vec<AgentActionEvent> = stmt
             .query_map(rusqlite::params![cursor, batch_size], |row| {
-                let rowid: i64 = row.get(18)?;
+                let rowid: i64 = row.get("_rowid")?;
                 let event = Self::row_to_event(row)?;
                 Ok((event, rowid))
             })?
@@ -434,35 +481,44 @@ impl LocalLedger {
     const EVENT_COLUMNS: &str = "event_id, agent_id, agent_version, authorized_by, session_id,
          timestamp, tool_name, tool_server, input_hash, output_hash,
          policy_decision, policy_rule, latency_ms, sequence_number,
-         prev_hash, event_hash, signature, proxy_key_id";
+         prev_hash, event_hash, signature, proxy_key_id,
+         input_data, output_data";
 
     fn row_to_event(row: &rusqlite::Row) -> rusqlite::Result<AgentActionEvent> {
-        let ts_str: String = row.get(5)?;
+        let ts_str: String = row.get("timestamp")?;
         let timestamp = chrono::DateTime::parse_from_rfc3339(&ts_str)
             .map(|dt| dt.with_timezone(&chrono::Utc))
             .unwrap_or_else(|_| chrono::Utc::now());
 
         Ok(AgentActionEvent {
-            event_id: row.get(0)?,
-            agent_id: row.get(1)?,
-            agent_version: row.get(2)?,
-            authorized_by: row.get(3)?,
-            session_id: row.get(4)?,
+            event_id: row.get("event_id")?,
+            agent_id: row.get("agent_id")?,
+            agent_version: row.get("agent_version")?,
+            authorized_by: row.get("authorized_by")?,
+            session_id: row.get("session_id")?,
             timestamp,
-            tool_name: row.get(6)?,
-            tool_server: row.get(7)?,
-            input_hash: row.get(8)?,
-            output_hash: row.get(9)?,
-            input_data: None, // Not stored in local SQLite — only synced to cloud
-            output_data: None,
-            policy_decision: row.get(10)?,
-            policy_rule: row.get(11)?,
-            latency_ms: row.get(12)?,
-            sequence_number: row.get(13)?,
-            prev_hash: row.get(14)?,
-            event_hash: row.get(15)?,
-            signature: row.get(16)?,
-            proxy_key_id: row.get(17)?,
+            tool_name: row.get("tool_name")?,
+            tool_server: row.get("tool_server")?,
+            input_hash: row.get("input_hash")?,
+            output_hash: row.get("output_hash")?,
+            input_data: row
+                .get::<_, Option<String>>("input_data")
+                .ok()
+                .flatten()
+                .and_then(|s| serde_json::from_str(&s).ok()),
+            output_data: row
+                .get::<_, Option<String>>("output_data")
+                .ok()
+                .flatten()
+                .and_then(|s| serde_json::from_str(&s).ok()),
+            policy_decision: row.get("policy_decision")?,
+            policy_rule: row.get("policy_rule")?,
+            latency_ms: row.get("latency_ms")?,
+            sequence_number: row.get("sequence_number")?,
+            prev_hash: row.get("prev_hash")?,
+            event_hash: row.get("event_hash")?,
+            signature: row.get("signature")?,
+            proxy_key_id: row.get("proxy_key_id")?,
         })
     }
 

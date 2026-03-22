@@ -11,15 +11,20 @@ use crate::identity::KeyManager;
 use crate::ledger::{AgentActionEvent, LocalLedger};
 use crate::policy::PolicyDecision;
 
+/// Parameters for logging a tool call event.
+pub struct EventParams<'a> {
+    pub tool_name: &'a str,
+    pub tool_server: &'a str,
+    pub input_hash: &'a str,
+    pub output_hash: &'a str,
+    pub input_data: Option<serde_json::Value>,
+    pub output_data: Option<serde_json::Value>,
+    pub decision: &'a PolicyDecision,
+    pub latency_ms: i64,
+}
+
 /// Create, sign, and append an event to the local ledger.
 /// Shared between stdio and HTTP proxy modes.
-///
-/// Assigns a monotonically increasing sequence number to each event.
-/// The sequence number is included in the event hash, making it tamper-evident.
-/// The cloud uses sequence numbers to detect gaps during sync (e.g., if the proxy
-/// loses connection, events queue locally and the cloud can detect missing sequence
-/// numbers on reconnect).
-#[allow(clippy::too_many_arguments)]
 pub fn log_event(
     ledger: &LocalLedger,
     key_manager: &KeyManager,
@@ -27,14 +32,7 @@ pub fn log_event(
     agent_id: &str,
     agent_version: &str,
     authorized_by: &str,
-    tool_name: &str,
-    tool_server: &str,
-    input_hash: &str,
-    output_hash: &str,
-    input_data: Option<serde_json::Value>,
-    output_data: Option<serde_json::Value>,
-    decision: &PolicyDecision,
-    latency_ms: i64,
+    params: EventParams,
 ) -> Result<String> {
     let prev_hash = ledger.last_event_hash()?;
     let sequence_number = ledger.next_sequence_number()?;
@@ -46,15 +44,15 @@ pub fn log_event(
         authorized_by: authorized_by.to_string(),
         session_id: session_id.to_string(),
         timestamp: chrono::Utc::now(),
-        tool_name: tool_name.to_string(),
-        tool_server: tool_server.to_string(),
-        input_hash: input_hash.to_string(),
-        output_hash: output_hash.to_string(),
-        input_data,
-        output_data,
-        policy_decision: decision.as_str().to_string(),
-        policy_rule: decision.rule_name().to_string(),
-        latency_ms,
+        tool_name: params.tool_name.to_string(),
+        tool_server: params.tool_server.to_string(),
+        input_hash: params.input_hash.to_string(),
+        output_hash: params.output_hash.to_string(),
+        input_data: params.input_data,
+        output_data: params.output_data,
+        policy_decision: params.decision.as_str().to_string(),
+        policy_rule: params.decision.rule_name().to_string(),
+        latency_ms: params.latency_ms,
         sequence_number,
         prev_hash,
         event_hash: String::new(),
