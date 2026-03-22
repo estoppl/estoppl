@@ -31,6 +31,8 @@ pub fn log_event(
     tool_server: &str,
     input_hash: &str,
     output_hash: &str,
+    input_data: Option<serde_json::Value>,
+    output_data: Option<serde_json::Value>,
     decision: &PolicyDecision,
     latency_ms: i64,
 ) -> Result<String> {
@@ -48,6 +50,8 @@ pub fn log_event(
         tool_server: tool_server.to_string(),
         input_hash: input_hash.to_string(),
         output_hash: output_hash.to_string(),
+        input_data,
+        output_data,
         policy_decision: decision.as_str().to_string(),
         policy_rule: decision.rule_name().to_string(),
         latency_ms,

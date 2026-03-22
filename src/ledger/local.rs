@@ -453,6 +453,8 @@ impl LocalLedger {
             tool_server: row.get(7)?,
             input_hash: row.get(8)?,
             output_hash: row.get(9)?,
+            input_data: None,  // Not stored in local SQLite — only synced to cloud
+            output_data: None,
             policy_decision: row.get(10)?,
             policy_rule: row.get(11)?,
             latency_ms: row.get(12)?,
@@ -636,6 +638,8 @@ mod tests {
             tool_server: "".to_string(),
             input_hash: sha256_hex(b"input"),
             output_hash: sha256_hex(b"output"),
+            input_data: None,
+            output_data: None,
             policy_decision: decision.to_string(),
             policy_rule: "".to_string(),
             latency_ms: 2,

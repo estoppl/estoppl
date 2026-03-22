@@ -557,6 +557,8 @@ mod tests {
             tool_server: "stdio".to_string(),
             input_hash: sha256_hex(b"input"),
             output_hash: sha256_hex(b"output"),
+            input_data: None,
+            output_data: None,
             policy_decision: "ALLOW".to_string(),
             policy_rule: "".to_string(),
             latency_ms: 2,

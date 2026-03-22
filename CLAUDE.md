@@ -52,7 +52,10 @@ src/
 
 ## Key design decisions
 
-- **Zero-data retention**: Raw tool call inputs/outputs are never stored. Only SHA-256 hashes are logged. Important for handling sensitive data (PII, financial data, API keys).
+- **Rich event logging with redaction**: By default, raw tool arguments are logged and synced to the cloud for auditing. Configurable `redact_fields` in estoppl.toml strips sensitive fields (SSN, credit card, etc.) before syncing — replaced with `"[REDACTED]"`. Input/output hashes are always stored regardless of redaction.
+- **Custom conditional rules**: Users define arbitrary rules checking any field in tool arguments with any operator (gt, lt, eq, neq, contains, etc.) and any action (block, human_review, allow). Supports wildcard tool matching (`*`, `wire_*`) and nested field paths (`payment.total`).
+- **Per-agent policy rules**: Different agents can have different rules via `agent_rules` map in cloud policy. Agent-specific rules override org-wide defaults.
+- **Blocking human review**: When `--sync` is enabled and policy decision is `HUMAN_REQUIRED`, the proxy holds the call (using `FuturesUnordered` for non-blocking), submits a review to the cloud, and polls every 2 seconds for approval. On approve: forwards to upstream. On deny/timeout (5 min): returns JSON-RPC error. Other tool calls continue flowing while a review is pending.
 - **Hash chaining**: Each event stores the SHA-256 hash of the previous event, creating a tamper-evident chain. Breakage is detectable via `estoppl audit --verify`.
 - **Guardrails before forwarding**: Blocked calls never reach the upstream MCP server. The proxy synthesizes a JSON-RPC error response directly.
 - **Tracing to stderr**: All log output goes to stderr so it doesn't interfere with stdio JSON-RPC on stdout.

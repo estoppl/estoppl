@@ -277,6 +277,7 @@ async fn cmd_start(
         &db_ledger,
         &policy_engine,
         review_client.clone(),
+        &config.rules.redact_fields,
     )
     .await
 }

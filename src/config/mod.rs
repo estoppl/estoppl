@@ -51,6 +51,98 @@ pub struct RulesConfig {
     /// Rate limit overrides for specific tools (e.g. { "stripe.create_payment" = 5 }).
     #[serde(default)]
     pub rate_limit_tools: std::collections::HashMap<String, u32>,
+    /// Fields to redact from tool arguments before syncing to cloud.
+    /// These fields are replaced with "[REDACTED]" in input_data.
+    /// If empty, all fields are logged as-is.
+    #[serde(default)]
+    pub redact_fields: Vec<String>,
+    /// Only require human review when amount exceeds this threshold.
+    /// Below this amount, human_review_tools are auto-allowed.
+    /// DEPRECATED: use custom_rules instead. Kept for backward compatibility.
+    #[serde(default)]
+    pub human_review_above_usd: Option<f64>,
+    /// Per-agent rule overrides. Keyed by agent_id.
+    #[serde(default)]
+    pub agent_rules: std::collections::HashMap<String, AgentRulesConfig>,
+    /// Custom conditional rules. Evaluated in order after built-in rules.
+    /// These allow arbitrary field checks on tool arguments.
+    #[serde(default)]
+    pub custom_rules: Vec<CustomRule>,
+}
+
+/// A custom conditional rule that checks a field in tool arguments.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomRule {
+    /// Human-readable name for this rule.
+    pub name: String,
+    /// Tool name pattern to match (supports wildcards like "wire_*"). Use "*" for all tools.
+    #[serde(default = "default_wildcard")]
+    pub tool: String,
+    /// Condition to evaluate against tool arguments.
+    pub condition: RuleCondition,
+    /// Action to take when condition matches.
+    pub action: RuleAction,
+}
+
+fn default_wildcard() -> String {
+    "*".to_string()
+}
+
+/// Condition that checks a field in tool call arguments.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuleCondition {
+    /// JSON path to the field in arguments (supports dot notation: "payment.amount").
+    pub field: String,
+    /// Comparison operator.
+    pub operator: RuleOperator,
+    /// Value to compare against. Interpreted as number or string based on operator.
+    pub value: serde_json::Value,
+}
+
+/// Comparison operators for custom rules.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum RuleOperator {
+    #[serde(alias = ">")]
+    Gt,
+    #[serde(alias = "<")]
+    Lt,
+    #[serde(alias = ">=")]
+    Gte,
+    #[serde(alias = "<=")]
+    Lte,
+    #[serde(alias = "==")]
+    Eq,
+    #[serde(alias = "!=")]
+    Neq,
+    Contains,
+    NotContains,
+}
+
+/// Action to take when a custom rule condition matches.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum RuleAction {
+    Block,
+    HumanReview,
+    Allow,
+}
+
+/// Per-agent rule overrides. Fields that are set override the org-wide defaults.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AgentRulesConfig {
+    #[serde(default)]
+    pub allow_tools: Option<Vec<String>>,
+    #[serde(default)]
+    pub block_tools: Option<Vec<String>>,
+    #[serde(default)]
+    pub human_review_tools: Option<Vec<String>>,
+    #[serde(default)]
+    pub max_amount_usd: Option<f64>,
+    #[serde(default)]
+    pub human_review_above_usd: Option<f64>,
+    #[serde(default)]
+    pub custom_rules: Option<Vec<CustomRule>>,
 }
 
 fn default_amount_field() -> String {
@@ -112,6 +204,10 @@ impl ProxyConfig {
                 amount_field: "amount".to_string(),
                 rate_limit_per_minute: None,
                 rate_limit_tools: std::collections::HashMap::new(),
+                redact_fields: vec![],
+                human_review_above_usd: None,
+                agent_rules: std::collections::HashMap::new(),
+                custom_rules: vec![],
             },
             ledger: LedgerConfig::default(),
         }

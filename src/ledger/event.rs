@@ -20,6 +20,12 @@ pub struct AgentActionEvent {
     pub input_hash: String,
     pub output_hash: String,
 
+    // Raw data (sent to cloud for auditing, redacted fields stripped by proxy)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_data: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_data: Option<serde_json::Value>,
+
     // Policy
     pub policy_decision: String,
     pub policy_rule: String,
@@ -87,6 +93,8 @@ mod tests {
             tool_server: "".to_string(),
             input_hash: sha256_hex(b"input"),
             output_hash: sha256_hex(b"output"),
+            input_data: None,
+            output_data: None,
             policy_decision: "ALLOW".to_string(),
             policy_rule: "".to_string(),
             latency_ms: 2,

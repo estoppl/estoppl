@@ -15,6 +15,27 @@ use crate::mcp::{JsonRpcRequest, JsonRpcResponse};
 use crate::policy::{PolicyDecision, PolicyEngine};
 use crate::review::{ReviewClient, ReviewOutcome};
 
+/// Redact specified fields from a JSON value, replacing with "[REDACTED]".
+fn redact_fields(value: &serde_json::Value, fields: &[String]) -> serde_json::Value {
+    if fields.is_empty() {
+        return value.clone();
+    }
+    match value {
+        serde_json::Value::Object(map) => {
+            let mut redacted = serde_json::Map::new();
+            for (k, v) in map {
+                if fields.iter().any(|f| f == k) {
+                    redacted.insert(k.clone(), serde_json::Value::String("[REDACTED]".to_string()));
+                } else {
+                    redacted.insert(k.clone(), redact_fields(v, fields));
+                }
+            }
+            serde_json::Value::Object(redacted)
+        }
+        _ => value.clone(),
+    }
+}
+
 /// Tracks an in-flight tools/call request so we can log the response too.
 struct PendingCall {
     tool_name: String,
@@ -36,6 +57,7 @@ pub async fn run_stdio_proxy(
     ledger: &LocalLedger,
     policy: &PolicyEngine,
     review_client: Option<Arc<ReviewClient>>,
+    redact_fields: &[String],
 ) -> Result<()> {
     let session_id = Uuid::now_v7().to_string();
 
@@ -124,6 +146,9 @@ pub async fn run_stdio_proxy(
                         .map(|p| p.name.clone())
                         .unwrap_or_else(|| "unknown".to_string());
                     let input_hash = sha256_hex(trimmed.as_bytes());
+                    let input_data = tool_params
+                        .as_ref()
+                        .map(|p| self::redact_fields(&p.arguments, redact_fields));
 
                     // Evaluate policy.
                     let decision = tool_params
@@ -165,6 +190,8 @@ pub async fn run_stdio_proxy(
                                 "stdio",
                                 &input_hash,
                                 "",
+                                input_data.clone(),
+                                None,
                                 &decision,
                                 0,
                             )?;
@@ -189,6 +216,8 @@ pub async fn run_stdio_proxy(
                                 "stdio",
                                 &input_hash,
                                 "",
+                                input_data.clone(),
+                                None,
                                 &decision,
                                 0,
                             )?;
@@ -247,6 +276,8 @@ pub async fn run_stdio_proxy(
                                 "stdio",
                                 &input_hash,
                                 "",
+                                input_data.clone(),
+                                None,
                                 &decision,
                                 0,
                             )?;

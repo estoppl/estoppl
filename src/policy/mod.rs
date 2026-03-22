@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
 
-use crate::config::RulesConfig;
+use crate::config::{CustomRule, RuleAction, RuleCondition, RuleOperator, RulesConfig};
 use crate::mcp::ToolCallParams;
 
 /// Result of a policy evaluation.
@@ -85,16 +85,52 @@ impl PolicyEngine {
     /// Evaluation order:
     /// 1. Block list — always blocked, even if also in allow list
     /// 2. Allow list — if non-empty, only listed tools are allowed (everything else is blocked)
-    /// 3. Human review list
-    /// 4. Amount threshold
+    /// 3. Human review list (with optional amount threshold)
+    /// 4. Amount threshold (block)
     /// 5. Rate limits
     /// 6. Default: allow
+    ///
+    /// Per-agent rules override org-wide defaults when the agent_id matches.
     pub fn evaluate(&self, tool_call: &ToolCallParams) -> PolicyDecision {
+        self.evaluate_for_agent(tool_call, None)
+    }
+
+    /// Evaluate with agent-specific rule overrides.
+    pub fn evaluate_for_agent(
+        &self,
+        tool_call: &ToolCallParams,
+        agent_id: Option<&str>,
+    ) -> PolicyDecision {
         let rules = self.rules.read().unwrap();
 
+        // Resolve effective rules: agent-specific overrides > org-wide defaults
+        let block_tools: &[String] = agent_id
+            .and_then(|id| rules.agent_rules.get(id))
+            .and_then(|ar| ar.block_tools.as_deref())
+            .unwrap_or(&rules.block_tools);
+
+        let allow_tools: &[String] = agent_id
+            .and_then(|id| rules.agent_rules.get(id))
+            .and_then(|ar| ar.allow_tools.as_deref())
+            .unwrap_or(&rules.allow_tools);
+
+        let human_review_tools: &[String] = agent_id
+            .and_then(|id| rules.agent_rules.get(id))
+            .and_then(|ar| ar.human_review_tools.as_deref())
+            .unwrap_or(&rules.human_review_tools);
+
+        let max_amount = agent_id
+            .and_then(|id| rules.agent_rules.get(id))
+            .and_then(|ar| ar.max_amount_usd)
+            .or(rules.max_amount_usd);
+
+        let human_review_above = agent_id
+            .and_then(|id| rules.agent_rules.get(id))
+            .and_then(|ar| ar.human_review_above_usd)
+            .or(rules.human_review_above_usd);
+
         // Check explicit block list first (highest priority).
-        if rules
-            .block_tools
+        if block_tools
             .iter()
             .any(|t| tool_matches(&tool_call.name, t))
         {
@@ -104,9 +140,8 @@ impl PolicyEngine {
         }
 
         // Check allow list — if non-empty, only listed tools pass through.
-        if !rules.allow_tools.is_empty()
-            && !rules
-                .allow_tools
+        if !allow_tools.is_empty()
+            && !allow_tools
                 .iter()
                 .any(|t| tool_matches(&tool_call.name, t))
         {
@@ -116,24 +151,73 @@ impl PolicyEngine {
         }
 
         // Check human review list.
-        if rules
-            .human_review_tools
+        if human_review_tools
             .iter()
             .any(|t| tool_matches(&tool_call.name, t))
         {
-            return PolicyDecision::HumanRequired {
-                rule: format!("human_review_tools:{}", tool_call.name),
+            // If human_review_above_usd is set, only require review above that amount.
+            if let Some(threshold) = human_review_above {
+                if let Some(amount) =
+                    extract_amount(&tool_call.arguments, &rules.amount_field)
+                {
+                    if amount > threshold {
+                        return PolicyDecision::HumanRequired {
+                            rule: format!(
+                                "human_review_above_usd:{}>{}", amount, threshold
+                            ),
+                        };
+                    }
+                    // Below threshold — skip human review, continue to other checks
+                } else {
+                    // No amount field — require review (safe default)
+                    return PolicyDecision::HumanRequired {
+                        rule: format!("human_review_tools:{}", tool_call.name),
+                    };
+                }
+            } else {
+                return PolicyDecision::HumanRequired {
+                    rule: format!("human_review_tools:{}", tool_call.name),
+                };
+            }
+        }
+
+        // Check amount threshold (block).
+        if let Some(max) = max_amount
+            && let Some(amount) = extract_amount(&tool_call.arguments, &rules.amount_field)
+            && amount > max
+        {
+            return PolicyDecision::Block {
+                rule: format!("max_amount_usd:{}>{}", amount, max),
             };
         }
 
-        // Check amount threshold.
-        if let Some(max_amount) = rules.max_amount_usd
-            && let Some(amount) = extract_amount(&tool_call.arguments, &rules.amount_field)
-            && amount > max_amount
-        {
-            return PolicyDecision::Block {
-                rule: format!("max_amount_usd:{}>{}", amount, max_amount),
-            };
+        // Check custom conditional rules.
+        let custom_rules: &[CustomRule] = agent_id
+            .and_then(|id| rules.agent_rules.get(id))
+            .and_then(|ar| ar.custom_rules.as_deref())
+            .unwrap_or(&rules.custom_rules);
+
+        for rule in custom_rules {
+            if tool_matches(&tool_call.name, &rule.tool)
+                && evaluate_condition(&rule.condition, &tool_call.arguments)
+            {
+                match &rule.action {
+                    RuleAction::Block => {
+                        return PolicyDecision::Block {
+                            rule: format!("custom:{}", rule.name),
+                        };
+                    }
+                    RuleAction::HumanReview => {
+                        return PolicyDecision::HumanRequired {
+                            rule: format!("custom:{}", rule.name),
+                        };
+                    }
+                    RuleAction::Allow => {
+                        // Explicit allow — skip remaining rules.
+                        return PolicyDecision::Allow;
+                    }
+                }
+            }
         }
 
         // Drop the read lock before acquiring the mutex for rate limiting.
@@ -175,10 +259,61 @@ impl PolicyEngine {
     }
 }
 
+/// Evaluate a custom rule condition against tool call arguments.
+fn evaluate_condition(condition: &RuleCondition, args: &serde_json::Value) -> bool {
+    // Extract the field value using dot notation.
+    let field_value = {
+        let mut current = args;
+        for part in condition.field.split('.') {
+            match current.get(part) {
+                Some(v) => current = v,
+                None => return false, // Field not found — condition doesn't match
+            }
+        }
+        current.clone()
+    };
+
+    match &condition.operator {
+        // Numeric comparisons
+        RuleOperator::Gt => compare_numbers(&field_value, &condition.value, |a, b| a > b),
+        RuleOperator::Lt => compare_numbers(&field_value, &condition.value, |a, b| a < b),
+        RuleOperator::Gte => compare_numbers(&field_value, &condition.value, |a, b| a >= b),
+        RuleOperator::Lte => compare_numbers(&field_value, &condition.value, |a, b| a <= b),
+
+        // Equality (works for strings, numbers, booleans)
+        RuleOperator::Eq => field_value == condition.value,
+        RuleOperator::Neq => field_value != condition.value,
+
+        // String containment
+        RuleOperator::Contains => {
+            let haystack = field_value.as_str().unwrap_or("");
+            let needle = condition.value.as_str().unwrap_or("");
+            haystack.contains(needle)
+        }
+        RuleOperator::NotContains => {
+            let haystack = field_value.as_str().unwrap_or("");
+            let needle = condition.value.as_str().unwrap_or("");
+            !haystack.contains(needle)
+        }
+    }
+}
+
+/// Compare two JSON values as f64 using the given comparison function.
+fn compare_numbers(a: &serde_json::Value, b: &serde_json::Value, cmp: fn(f64, f64) -> bool) -> bool {
+    match (a.as_f64(), b.as_f64()) {
+        (Some(a), Some(b)) => cmp(a, b),
+        _ => false,
+    }
+}
+
 /// Match tool name with support for wildcards (e.g. "stripe.*" matches "stripe.create_payment").
 fn tool_matches(tool_name: &str, pattern: &str) -> bool {
-    if let Some(prefix) = pattern.strip_suffix(".*") {
+    if pattern == "*" {
+        true
+    } else if let Some(prefix) = pattern.strip_suffix(".*") {
         tool_name.starts_with(prefix)
+    } else if let Some(prefix) = pattern.strip_suffix("_*") {
+        tool_name.starts_with(&format!("{}_", prefix))
     } else {
         tool_name == pattern
     }
@@ -207,6 +342,10 @@ mod tests {
             amount_field: "amount".to_string(),
             rate_limit_per_minute: None,
             rate_limit_tools: HashMap::new(),
+            redact_fields: vec![],
+            human_review_above_usd: None,
+            agent_rules: HashMap::new(),
+            custom_rules: vec![],
         }
     }
 

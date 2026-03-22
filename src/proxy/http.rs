@@ -45,6 +45,8 @@ impl ProxyState {
         tool_name: &str,
         input_hash: &str,
         output_hash: &str,
+        input_data: Option<serde_json::Value>,
+        output_data: Option<serde_json::Value>,
         decision: &PolicyDecision,
         latency_ms: i64,
     ) {
@@ -60,6 +62,8 @@ impl ProxyState {
             &self.upstream_url,
             input_hash,
             output_hash,
+            input_data,
+            output_data,
             decision,
             latency_ms,
         ) {
@@ -183,7 +187,7 @@ async fn handle_post(state: Arc<ProxyState>, headers: HeaderMap, body: Bytes) ->
 
             match &decision {
                 PolicyDecision::Block { rule } => {
-                    state.log_event(&tool_name, &input_hash, "", &decision, 0);
+                    state.log_event(&tool_name, &input_hash, "", None, None, &decision, 0);
 
                     blocked_responses.push(JsonRpcResponse::error(
                         req.id.clone(),
@@ -500,6 +504,8 @@ fn log_single_response(
             &call.tool_name,
             &call.input_hash,
             &output_hash,
+            None, // TODO: capture input_data in TrackedCall
+            None, // TODO: capture output_data from response
             &call.decision,
             latency_ms,
         );
