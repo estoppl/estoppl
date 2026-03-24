@@ -56,11 +56,14 @@ pub fn log_event(
         sequence_number,
         prev_hash,
         event_hash: String::new(),
+        hash_input: None,
         signature: String::new(),
         proxy_key_id: key_manager.key_id.clone(),
     };
 
-    event.event_hash = event.compute_hash();
+    let (hash, hash_input) = event.compute_hash_with_input();
+    event.event_hash = hash;
+    event.hash_input = Some(hash_input);
     event.signature = key_manager.sign(event.event_hash.as_bytes());
 
     let event_id = event.event_id.clone();

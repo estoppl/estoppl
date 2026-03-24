@@ -565,6 +565,7 @@ mod tests {
             sequence_number: seq,
             prev_hash: prev_hash.to_string(),
             event_hash: "".to_string(),
+            hash_input: None,
             signature: "fake-sig".to_string(),
             proxy_key_id: "test-key".to_string(),
         };

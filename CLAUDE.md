@@ -19,7 +19,7 @@ This is the OSS layer of a two-layer architecture:
 - **Storage**: Local SQLite with WAL mode, hash-chained events
 - **Signing**: Ed25519 via ed25519-dalek
 - **HTTP framework**: axum (for HTTP proxy mode + dashboard)
-- **CLI**: clap with subcommands: `init`, `start`, `start-http`, `audit`, `report`, `tail`, `stats`, `wrap`, `unwrap`, `dashboard`
+- **CLI**: clap with subcommands: `init`, `start`, `start-http`, `audit` (`--verify`, `--verify-receipt`, `--verify-export`), `report`, `tail`, `stats`, `wrap`, `unwrap`, `dashboard`
 - **Distribution**: GitHub Releases, crates.io (`cargo install estoppl`), npm (`npx estoppl`), Homebrew (`brew install estoppl`)
 
 ## Source layout
@@ -56,6 +56,8 @@ src/
 - **Custom conditional rules**: Users define arbitrary rules checking any field in tool arguments with any operator (gt, lt, eq, neq, contains, etc.) and any action (block, human_review, allow). Supports wildcard tool matching (`*`, `wire_*`) and nested field paths (`payment.total`).
 - **Per-agent policy rules**: Different agents can have different rules via `agent_rules` map in cloud policy. Agent-specific rules override org-wide defaults.
 - **Blocking human review**: When `--sync` is enabled and policy decision is `HUMAN_REQUIRED`, the proxy holds the call (using `FuturesUnordered` for non-blocking), submits a review to the cloud, and polls every 2 seconds for approval. On approve: forwards to upstream. On deny/timeout (5 min): returns JSON-RPC error. Other tool calls continue flowing while a review is pending.
+- **Offline receipt verification**: `estoppl audit --verify-receipt` recomputes SHA-256 from the receipt's `hash_input` and compares to `event_hash`. Also verifies Ed25519 signature against local keys and checks field integrity against local DB.
+- **Offline export verification**: `estoppl audit --verify-export` verifies an entire compliance export — recomputes hashes for all events and checks chain linkage (prev_hash) per proxy_key_id.
 - **Hash chaining**: Each event stores the SHA-256 hash of the previous event, creating a tamper-evident chain. Breakage is detectable via `estoppl audit --verify`.
 - **Guardrails before forwarding**: Blocked calls never reach the upstream MCP server. The proxy synthesizes a JSON-RPC error response directly.
 - **Tracing to stderr**: All log output goes to stderr so it doesn't interfere with stdio JSON-RPC on stdout.

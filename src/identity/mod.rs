@@ -60,6 +60,27 @@ impl KeyManager {
     pub fn verifying_key(&self) -> VerifyingKey {
         self.signing_key.verifying_key()
     }
+
+    /// Verify a base64-encoded signature against data using this key's public key.
+    pub fn verify(&self, data: &[u8], signature_b64: &str) -> bool {
+        let sig_bytes =
+            match base64::Engine::decode(&base64::engine::general_purpose::STANDARD, signature_b64)
+            {
+                Ok(b) => b,
+                Err(_) => return false,
+            };
+
+        let signature = match ed25519_dalek::Signature::from_slice(&sig_bytes) {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
+
+        use ed25519_dalek::Verifier;
+        self.signing_key
+            .verifying_key()
+            .verify(data, &signature)
+            .is_ok()
+    }
 }
 
 #[cfg(test)]

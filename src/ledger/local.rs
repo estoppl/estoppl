@@ -47,6 +47,7 @@ impl LocalLedger {
                 proxy_key_id    TEXT NOT NULL,
                 input_data      TEXT,
                 output_data     TEXT,
+                hash_input      TEXT,
                 created_at      TEXT NOT NULL DEFAULT (datetime('now'))
             );
 
@@ -74,6 +75,7 @@ impl LocalLedger {
         // SQLite doesn't support ALTER TABLE ADD COLUMN IF NOT EXISTS, so we ignore errors.
         let _ = conn.execute("ALTER TABLE events ADD COLUMN input_data TEXT", []);
         let _ = conn.execute("ALTER TABLE events ADD COLUMN output_data TEXT", []);
+        let _ = conn.execute("ALTER TABLE events ADD COLUMN hash_input TEXT", []);
 
         Ok(Self { conn })
     }
@@ -95,13 +97,13 @@ impl LocalLedger {
                 timestamp, tool_name, tool_server, input_hash, output_hash,
                 policy_decision, policy_rule, latency_ms, sequence_number,
                 prev_hash, event_hash, signature, proxy_key_id,
-                input_data, output_data
+                input_data, output_data, hash_input
             ) VALUES (
                 :event_id, :agent_id, :agent_version, :authorized_by, :session_id,
                 :timestamp, :tool_name, :tool_server, :input_hash, :output_hash,
                 :policy_decision, :policy_rule, :latency_ms, :sequence_number,
                 :prev_hash, :event_hash, :signature, :proxy_key_id,
-                :input_data, :output_data
+                :input_data, :output_data, :hash_input
             )",
             rusqlite::named_params! {
                 ":event_id": event.event_id,
@@ -124,6 +126,7 @@ impl LocalLedger {
                 ":proxy_key_id": event.proxy_key_id,
                 ":input_data": input_data_json,
                 ":output_data": output_data_json,
+                ":hash_input": event.hash_input,
             },
         )?;
         Ok(())
@@ -482,7 +485,7 @@ impl LocalLedger {
          timestamp, tool_name, tool_server, input_hash, output_hash,
          policy_decision, policy_rule, latency_ms, sequence_number,
          prev_hash, event_hash, signature, proxy_key_id,
-         input_data, output_data";
+         input_data, output_data, hash_input";
 
     fn row_to_event(row: &rusqlite::Row) -> rusqlite::Result<AgentActionEvent> {
         let ts_str: String = row.get("timestamp")?;
@@ -517,6 +520,7 @@ impl LocalLedger {
             sequence_number: row.get("sequence_number")?,
             prev_hash: row.get("prev_hash")?,
             event_hash: row.get("event_hash")?,
+            hash_input: row.get::<_, Option<String>>("hash_input").ok().flatten(),
             signature: row.get("signature")?,
             proxy_key_id: row.get("proxy_key_id")?,
         })
@@ -702,6 +706,7 @@ mod tests {
             sequence_number,
             prev_hash: prev_hash.to_string(),
             event_hash: "".to_string(),
+            hash_input: None,
             signature: "fake-sig".to_string(),
             proxy_key_id: "test-key".to_string(),
         };

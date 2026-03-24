@@ -38,13 +38,20 @@ pub struct AgentActionEvent {
     pub sequence_number: i64,
     pub prev_hash: String,
     pub event_hash: String,
+    /// The canonical JSON string that was hashed to produce event_hash.
+    /// Included in receipts so verifiers can recompute SHA-256 independently.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hash_input: Option<String>,
     pub signature: String,
     pub proxy_key_id: String,
 }
 
 impl AgentActionEvent {
     /// Compute the SHA-256 hash of this event (excluding event_hash and signature fields).
-    pub fn compute_hash(&self) -> String {
+    /// Compute the SHA-256 hash and return both the hash and the canonical JSON
+    /// that was hashed. The canonical JSON is stored so receipts can include it
+    /// for independent verification without recomputing.
+    pub fn compute_hash_with_input(&self) -> (String, String) {
         let hashable = serde_json::json!({
             "event_id": self.event_id,
             "agent_id": self.agent_id,
@@ -66,7 +73,12 @@ impl AgentActionEvent {
         let canonical = serde_json::to_string(&hashable).expect("serialization cannot fail");
         let mut hasher = Sha256::new();
         hasher.update(canonical.as_bytes());
-        hex::encode(hasher.finalize())
+        (hex::encode(hasher.finalize()), canonical)
+    }
+
+    /// Compute just the hash (backward compatible).
+    pub fn compute_hash(&self) -> String {
+        self.compute_hash_with_input().0
     }
 }
 
@@ -101,6 +113,7 @@ mod tests {
             sequence_number: 0,
             prev_hash: prev_hash.to_string(),
             event_hash: "".to_string(),
+            hash_input: None,
             signature: "".to_string(),
             proxy_key_id: "test-key".to_string(),
         }
