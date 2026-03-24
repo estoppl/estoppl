@@ -762,58 +762,52 @@ fn cmd_verify_receipt(path: &Path) -> Result<()> {
     // Verify against local ledger — check both hash AND field values
     let config_path = PathBuf::from("estoppl.toml");
     let mut fields_tampered = false;
-    if config_path.exists() {
-        if let Ok(config) = config::ProxyConfig::load(&config_path) {
-            if let Ok(ledger) = ledger::LocalLedger::open(&config.ledger.db_path) {
-                if let Ok(events) = ledger.query_events_filtered(None, None, None, None, None) {
-                    if let Some(local_event) = events.iter().find(|e| e.event_id == event_id) {
-                        if local_event.event_hash == event_hash {
-                            println!("\x1b[32mLocal DB:  HASH MATCH\x1b[0m");
-                        } else {
-                            println!(
-                                "\x1b[31mLocal DB:  HASH MISMATCH — receipt hash differs from local ledger\x1b[0m"
-                            );
-                        }
-
-                        // Check if display fields match the local event
-                        let mut mismatches = Vec::new();
-                        if tool_name != local_event.tool_name {
-                            mismatches.push(format!(
-                                "tool_name: receipt='{}' local='{}'",
-                                tool_name, local_event.tool_name
-                            ));
-                        }
-                        if decision != local_event.policy_decision {
-                            mismatches.push(format!(
-                                "policy_decision: receipt='{}' local='{}'",
-                                decision, local_event.policy_decision
-                            ));
-                        }
-                        let receipt_agent =
-                            event.get("agent_id").and_then(|v| v.as_str()).unwrap_or("");
-                        if receipt_agent != local_event.agent_id {
-                            mismatches.push(format!(
-                                "agent_id: receipt='{}' local='{}'",
-                                receipt_agent, local_event.agent_id
-                            ));
-                        }
-
-                        if !mismatches.is_empty() {
-                            fields_tampered = true;
-                            println!(
-                                "\x1b[31mLocal DB:  FIELDS TAMPERED — display data was modified:\x1b[0m"
-                            );
-                            for m in &mismatches {
-                                println!("           - {}", m);
-                            }
-                        } else {
-                            println!("\x1b[32mLocal DB:  FIELDS MATCH\x1b[0m");
-                        }
-                    } else {
-                        println!("Local DB:  Event not found in local ledger");
-                    }
-                }
+    if config_path.exists()
+        && let Ok(config) = config::ProxyConfig::load(&config_path)
+        && let Ok(ledger) = ledger::LocalLedger::open(&config.ledger.db_path)
+        && let Ok(events) = ledger.query_events_filtered(None, None, None, None, None)
+    {
+        if let Some(local_event) = events.iter().find(|e| e.event_id == event_id) {
+            if local_event.event_hash == event_hash {
+                println!("\x1b[32mLocal DB:  HASH MATCH\x1b[0m");
+            } else {
+                println!(
+                    "\x1b[31mLocal DB:  HASH MISMATCH — receipt hash differs from local ledger\x1b[0m"
+                );
             }
+
+            let mut mismatches = Vec::new();
+            if tool_name != local_event.tool_name {
+                mismatches.push(format!(
+                    "tool_name: receipt='{}' local='{}'",
+                    tool_name, local_event.tool_name
+                ));
+            }
+            if decision != local_event.policy_decision {
+                mismatches.push(format!(
+                    "policy_decision: receipt='{}' local='{}'",
+                    decision, local_event.policy_decision
+                ));
+            }
+            let receipt_agent = event.get("agent_id").and_then(|v| v.as_str()).unwrap_or("");
+            if receipt_agent != local_event.agent_id {
+                mismatches.push(format!(
+                    "agent_id: receipt='{}' local='{}'",
+                    receipt_agent, local_event.agent_id
+                ));
+            }
+
+            if !mismatches.is_empty() {
+                fields_tampered = true;
+                println!("\x1b[31mLocal DB:  FIELDS TAMPERED — display data was modified:\x1b[0m");
+                for m in &mismatches {
+                    println!("           - {}", m);
+                }
+            } else {
+                println!("\x1b[32mLocal DB:  FIELDS MATCH\x1b[0m");
+            }
+        } else {
+            println!("Local DB:  Event not found in local ledger");
         }
     }
 
