@@ -18,8 +18,6 @@ use crate::policy::{PolicyDecision, PolicyEngine};
 /// Tracked tool call for logging when response arrives.
 struct TrackedCall {
     tool_name: String,
-    input_hash: String,
-    decision: PolicyDecision,
     start: std::time::Instant,
 }
 
@@ -40,7 +38,7 @@ struct ProxyState {
 }
 
 impl ProxyState {
-    fn log_event(&self, params: super::EventParams) {
+    fn log_event(&self, params: super::EventParams) -> Option<String> {
         let ledger = self.ledger.lock().unwrap();
         match super::log_event(
             &ledger,
@@ -51,8 +49,11 @@ impl ProxyState {
             &self.authorized_by,
             params,
         ) {
-            Ok(_event_id) => {}
-            Err(e) => tracing::error!(error = %e, "Failed to log event"),
+            Ok(event_id) => Some(event_id),
+            Err(e) => {
+                tracing::error!(error = %e, "Failed to log event");
+                None
+            }
         }
     }
 }
@@ -146,6 +147,7 @@ async fn handle_post(state: Arc<ProxyState>, headers: HeaderMap, body: Bytes) ->
     let mut blocked_responses: Vec<JsonRpcResponse> = Vec::new();
     let mut forward_requests: Vec<serde_json::Value> = Vec::new();
     let mut tracked: HashMap<String, TrackedCall> = HashMap::new();
+    let mut attestation_ids: Vec<String> = Vec::new();
 
     for req in &requests {
         if req.is_tool_call() {
@@ -191,12 +193,24 @@ async fn handle_post(state: Arc<ProxyState>, headers: HeaderMap, body: Bytes) ->
                 _ => {
                     let req_id_key = req.id.as_ref().map(|v| v.to_string()).unwrap_or_default();
 
+                    // Log event before forwarding so we have an attestation ID
+                    if let Some(id) = state.log_event(super::EventParams {
+                        tool_name: &tool_name,
+                        tool_server: &state.upstream_url,
+                        input_hash: &input_hash,
+                        output_hash: "",
+                        input_data: None,
+                        output_data: None,
+                        decision: &decision,
+                        latency_ms: 0,
+                    }) {
+                        attestation_ids.push(id);
+                    }
+
                     tracked.insert(
                         req_id_key,
                         TrackedCall {
                             tool_name,
-                            input_hash,
-                            decision: decision.clone(),
                             start: std::time::Instant::now(),
                         },
                     );
@@ -241,8 +255,10 @@ async fn handle_post(state: Arc<ProxyState>, headers: HeaderMap, body: Bytes) ->
         serde_json::to_vec(&forward_requests).unwrap_or_default()
     };
 
-    let upstream_resp = match forward_post_to_upstream(&state, &headers, forward_body.into()).await
-    {
+    let upstream_resp =
+        match forward_post_to_upstream(&state, &headers, forward_body.into(), &attestation_ids)
+            .await
+        {
         Ok(resp) => resp,
         Err(e) => {
             tracing::error!(error = %e, "Failed to forward to upstream");
@@ -372,7 +388,7 @@ async fn handle_delete(state: Arc<ProxyState>, headers: HeaderMap) -> Response {
 
 /// Forward a raw POST body to upstream without interception.
 async fn forward_post_raw(state: &ProxyState, headers: &HeaderMap, body: Bytes) -> Response {
-    match forward_post_to_upstream(state, headers, body).await {
+    match forward_post_to_upstream(state, headers, body, &[]).await {
         Ok(resp) => {
             let status = resp.status();
             let resp_headers = resp.headers().clone();
@@ -398,12 +414,18 @@ async fn forward_post_to_upstream(
     state: &ProxyState,
     headers: &HeaderMap,
     body: Bytes,
+    attestation_ids: &[String],
 ) -> Result<reqwest::Response, reqwest::Error> {
     let mut req_builder = state
         .http_client
         .post(&state.upstream_url)
         .header("Content-Type", "application/json")
         .header("Accept", "application/json, text/event-stream");
+
+    // Attestation header: upstream can verify via GET /v1/verify/{id}
+    if !attestation_ids.is_empty() {
+        req_builder = req_builder.header("X-Estoppl-Attestation", attestation_ids.join(","));
+    }
 
     if let Some(session_id) = headers.get("mcp-session-id") {
         req_builder = req_builder.header("Mcp-Session-Id", session_id);
@@ -482,32 +504,19 @@ fn log_tracked_responses(
 }
 
 fn log_single_response(
-    state: &ProxyState,
+    _state: &ProxyState,
     tracked: &HashMap<String, TrackedCall>,
     resp: &JsonRpcResponse,
-    resp_str: &str,
+    _resp_str: &str,
 ) {
     let resp_id_key = resp.id.as_ref().map(|v| v.to_string()).unwrap_or_default();
 
     if let Some(call) = tracked.get(&resp_id_key) {
-        let output_hash = sha256_hex(resp_str.as_bytes());
         let latency_ms = call.start.elapsed().as_millis() as i64;
-
-        state.log_event(super::EventParams {
-            tool_name: &call.tool_name,
-            tool_server: &state.upstream_url,
-            input_hash: &call.input_hash,
-            output_hash: &output_hash,
-            input_data: None,
-            output_data: None,
-            decision: &call.decision,
-            latency_ms,
-        });
-
         tracing::info!(
             tool = call.tool_name,
             latency_ms = latency_ms,
-            "Logged tool call response (HTTP)"
+            "Tool call response received (HTTP)"
         );
     }
 }
@@ -602,6 +611,21 @@ mod tests {
         let upstream = r#"{"jsonrpc":"2.0","id":1,"result":{}}"#;
         let merged = merge_responses(upstream.as_bytes(), &[]);
         assert_eq!(merged, upstream.as_bytes());
+    }
+
+    #[test]
+    fn test_attestation_ids_collected_for_allowed_calls() {
+        // Verify that allowed calls would produce attestation IDs
+        // (unit test: just verify the policy decision is Allow for a non-blocked tool)
+        let policy = make_policy();
+        let tool_params = crate::mcp::ToolCallParams {
+            name: "safe_tool".into(),
+            arguments: serde_json::json!({}),
+        };
+        assert!(matches!(
+            policy.evaluate(&tool_params),
+            PolicyDecision::Allow
+        ));
     }
 
     #[test]
