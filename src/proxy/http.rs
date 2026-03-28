@@ -259,12 +259,12 @@ async fn handle_post(state: Arc<ProxyState>, headers: HeaderMap, body: Bytes) ->
         match forward_post_to_upstream(&state, &headers, forward_body.into(), &attestation_ids)
             .await
         {
-        Ok(resp) => resp,
-        Err(e) => {
-            tracing::error!(error = %e, "Failed to forward to upstream");
-            return (StatusCode::BAD_GATEWAY, format!("Upstream error: {}", e)).into_response();
-        }
-    };
+            Ok(resp) => resp,
+            Err(e) => {
+                tracing::error!(error = %e, "Failed to forward to upstream");
+                return (StatusCode::BAD_GATEWAY, format!("Upstream error: {}", e)).into_response();
+            }
+        };
 
     let upstream_status = upstream_resp.status();
     let upstream_headers = upstream_resp.headers().clone();
