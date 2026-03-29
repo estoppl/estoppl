@@ -77,7 +77,7 @@ src/
 
 ```bash
 cargo build          # builds the `estoppl` binary
-cargo test           # runs all 82 tests (unit + integration)
+cargo test           # runs all tests (unit + integration)
 cargo run -- init    # test the init command
 ```
 

@@ -176,7 +176,16 @@ fn restore_config(config: &mut Value) -> usize {
     restored
 }
 
-/// Run the wrap command.
+/// Auto-wrap MCP client configs to route tool calls through estoppl.
+///
+/// Discovers MCP client configs (Claude Desktop, Cursor, Windsurf) and rewrites
+/// each stdio server entry to launch via `estoppl start`. If `estoppl.toml` exists
+/// in the current directory, its absolute path is embedded via `--config` so the
+/// proxy finds its config regardless of the MCP client's working directory.
+///
+/// Creates a `.estoppl-backup` file before first modification. Idempotent — already
+/// wrapped servers are skipped. HTTP-only servers (no `command` field) are skipped.
+/// Use `restore=true` (or `estoppl unwrap`) to reverse.
 pub fn run_wrap(dry_run: bool, restore: bool, client_filter: Option<&str>) -> Result<()> {
     let clients = detect_clients();
     let cp = config_path();

@@ -404,3 +404,114 @@ done
         verify_stdout
     );
 }
+
+#[test]
+fn test_config_relative_db_path() {
+    // When --config points to a file in a subdirectory, the relative db_path
+    // should resolve against the config file's directory, not the process cwd.
+    let dir = tempfile::TempDir::new().unwrap();
+
+    // Create a subdirectory with estoppl.toml
+    let sub = dir.path().join("project");
+    std::fs::create_dir_all(&sub).unwrap();
+
+    // Init in the subdirectory
+    let output = Command::new(estoppl_bin())
+        .args(["init", "--agent-id", "test-agent"])
+        .current_dir(&sub)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "init failed");
+
+    // The db should be at project/.estoppl/events.db
+    assert!(sub.join(".estoppl/events.db").exists());
+
+    // Now run audit from the parent dir using --config pointing to the subdirectory
+    let output = Command::new(estoppl_bin())
+        .args([
+            "audit",
+            "-n",
+            "5",
+            "--config",
+            sub.join("estoppl.toml").to_str().unwrap(),
+        ])
+        .current_dir(dir.path()) // different from config location
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "audit should succeed with --config from different cwd: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        stdout.contains("No events found"),
+        "Should read the correct db: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_wrap_embeds_config_path() {
+    let dir = tempfile::TempDir::new().unwrap();
+
+    // Create estoppl.toml in the working directory
+    std::fs::write(
+        dir.path().join("estoppl.toml"),
+        "[agent]\nid = \"test\"\n",
+    )
+    .unwrap();
+
+    // Create a fake MCP client config
+    let fake_home = dir.path().join("fakehome");
+    std::fs::create_dir_all(fake_home.join(".cursor")).unwrap();
+    std::fs::write(
+        fake_home.join(".cursor/mcp.json"),
+        r#"{"mcpServers":{"test":{"command":"echo","args":["hello"]}}}"#,
+    )
+    .unwrap();
+
+    // Run wrap with HOME pointing to fake home
+    let output = Command::new(estoppl_bin())
+        .args(["wrap", "--client", "cursor"])
+        .current_dir(dir.path())
+        .env("HOME", fake_home.to_str().unwrap())
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "wrap failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Read the wrapped config and verify --config is embedded
+    let wrapped = std::fs::read_to_string(fake_home.join(".cursor/mcp.json")).unwrap();
+    let config: serde_json::Value = serde_json::from_str(&wrapped).unwrap();
+    let args = config["mcpServers"]["test"]["args"]
+        .as_array()
+        .expect("args should be array");
+
+    let args_str: Vec<&str> = args.iter().map(|v| v.as_str().unwrap()).collect();
+
+    // Should contain --config with the absolute path
+    assert!(
+        args_str.contains(&"--config"),
+        "Wrapped args should contain --config: {:?}",
+        args_str
+    );
+
+    let config_idx = args_str.iter().position(|a| *a == "--config").unwrap();
+    let config_path = args_str[config_idx + 1];
+    assert!(
+        config_path.ends_with("estoppl.toml"),
+        "Config path should point to estoppl.toml: {}",
+        config_path
+    );
+    assert!(
+        std::path::Path::new(config_path).is_absolute(),
+        "Config path should be absolute: {}",
+        config_path
+    );
+}

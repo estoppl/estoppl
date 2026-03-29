@@ -154,13 +154,14 @@ pub struct LedgerConfig {
     /// Path to the local SQLite database.
     #[serde(default = "default_db_path")]
     pub db_path: PathBuf,
-    /// Cloud ledger endpoint (future use).
+    /// Cloud endpoint for syncing events. Defaults to https://api.estoppl.ai/v1/events
+    /// when cloud_api_key is set. Override for local dev (e.g. http://localhost:8080/v1/events).
     #[serde(default)]
     pub cloud_endpoint: Option<String>,
-    /// API key for cloud ledger (future use).
+    /// API key for cloud sync. When set, the proxy automatically syncs events to the cloud.
     #[serde(default)]
     pub cloud_api_key: Option<String>,
-    /// Organization ID for cloud policy sync.
+    /// Organization ID. Required for policy sync (remote kill switch) and human review.
     #[serde(default)]
     pub org_id: Option<String>,
 }

@@ -61,10 +61,10 @@ cargo install estoppl
 ```bash
 estoppl init --agent-id my-agent
 estoppl wrap                    # auto-wraps Claude Desktop, Cursor, Windsurf configs
-estoppl dashboard               # open http://127.0.0.1:4200
+estoppl tail                    # live-stream tool calls as they happen
 ```
 
-That's it. Every MCP tool call now flows through estoppl.
+Restart your MCP client (Cursor, Claude Desktop, etc.) and every tool call now flows through estoppl. The proxy runs as a subprocess — your MCP client starts it automatically via the wrapped config.
 
 ![Estoppl Dashboard](docs/dashboard.png)
 
@@ -95,28 +95,20 @@ Hash chain INTACT — 6 events verified
 ```toml
 [agent]
 id = "my-agent"
+version = "0.1.0"
 
 [rules]
-# Only allow these tools (empty = allow all). Supports wildcards.
-# allow_tools = ["read_portfolio", "get_balance", "stripe.list_*"]
-
-# Block these tools entirely — they never reach the MCP server
-block_tools = ["delete_account", "drop_database"]
-
-# Flag sensitive operations for review
 human_review_tools = ["wire_transfer", "execute_trade"]
-
-# Block any call where the amount exceeds this value
 max_amount_usd = 50000.0
-
-# Prevent runaway agents — max calls per tool per minute
-rate_limit_per_minute = 30
+amount_field = "amount"
 
 # Connect to estoppl cloud (https://app.estoppl.ai)
 # [ledger]
 # cloud_api_key = "sk_your_key"
-# org_id = "your-org-id"
+# org_id = "your_org_id"
 ```
+
+Add `cloud_api_key` and `org_id` to enable cloud sync, the remote kill switch, and human review. Cloud sync starts automatically — no extra flags needed.
 
 ### How guardrails work
 
@@ -212,32 +204,43 @@ Events always persist locally first. Cloud sync is best-effort with exponential 
 
 When `cloud_api_key` and `org_id` are configured, the proxy polls the cloud for policy updates every 5 seconds. If an admin blocks a tool in the cloud dashboard, every proxy in the org picks it up and starts rejecting that tool — no restart required.
 
+## estoppl Cloud
+
+The open-source proxy works standalone — no account needed. For teams that need org-wide visibility, connect it to [estoppl cloud](https://app.estoppl.ai) (free during early access):
+
+- **Real-time dashboard** — monitor every agent across your org
+- **Remote kill switch** — block a tool from the dashboard, every proxy updates within 5 seconds
+- **Human review** — high-risk tool calls pause until a human approves via dashboard, Slack, or webhook
+- **Compliance exports** — downloadable evidence packs with chain verification proof
+- **Alerting** — Slack and webhook notifications on policy violations
+
+Add two lines to your `estoppl.toml` and sync starts automatically:
+
+```toml
+[ledger]
+cloud_api_key = "sk_your_key"
+org_id = "your-org-id"
+```
+
+Sign up at [app.estoppl.ai](https://app.estoppl.ai) or [book a demo](https://calendly.com/tina-estoppl/30min).
+
 ## Roadmap
 
-### Current
 - [x] stdio + HTTP/SSE proxy modes (full MCP Streamable HTTP transport)
 - [x] Guardrails: allow lists, block lists, wildcards, amount thresholds, rate limiting
-- [x] Ed25519 signed, hash-chained audit log with zero data retention
-- [x] Local web dashboard + HTML reports
+- [x] Ed25519 signed, hash-chained audit log
 - [x] `estoppl wrap` — one-command setup for Claude Desktop, Cursor, Windsurf
-- [x] Distribution: Homebrew, npm, Cargo, GitHub Releases
-- [x] **Cloud sync** — stream events to estoppl cloud with chain verification, gap detection, and automatic reconciliation
-- [x] **Remote kill switch** — cloud-managed policy hot-reload, block tools org-wide within seconds
-
-### Future
-- [ ] **Attestation header** — signed proof of policy evaluation forwarded with each tool call
-- [ ] **Cloud verification API** — API providers verify attestations against the tamper-proof cloud ledger
-- [ ] **Cloud dashboard** — alerting, compliance export, team access control
-- [ ] **Immutable WORM storage** for regulated industries (SEC 17a-4)
-- [ ] Blocking human review — tools pause until explicit approval
+- [x] Cloud sync with chain verification and gap reconciliation
+- [x] Remote kill switch — cloud-managed policy hot-reload
+- [x] Attestation header (`X-Estoppl-Attestation`) on forwarded HTTP requests
+- [x] Cloud dashboard with real-time monitoring, policy editor, human review
+- [x] Blocking human review — tool calls pause until explicit approval
+- [ ] Cloud verification API — upstream servers verify attestations before processing
+- [ ] Immutable WORM storage for regulated industries (SEC 17a-4)
 - [ ] OPA integration for enterprise policy management
 - [ ] OpenAI function calling + A2A protocol interception
 
-The long-term vision: estoppl becomes the trust layer for AI agent tool calls — API providers require estoppl attestation before processing high-risk operations, the same way merchants require Visa before processing a payment. See [ARCHITECTURE.md](ARCHITECTURE.md) for details.
-
-## For regulated teams
-
-If you're in financial services and need legally defensible audit records — immutable WORM storage, regulatory evidence packs, cross-org trust verification — see [estoppl.ai](https://estoppl.ai) for the enterprise platform. This proxy is the open-source foundation; the cloud ledger is where compliance certification lives.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for technical details.
 
 ## Security research
 
