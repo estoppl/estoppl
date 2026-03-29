@@ -254,6 +254,10 @@ MCP security is an active and rapidly evolving area. Key references:
 - [Timeline of MCP Security Breaches](https://authzed.com/blog/timeline-mcp-breaches) — AuthZed
 - [MCP Tools: Attack Vectors and Defense](https://www.elastic.co/security-labs/mcp-tools-attack-defense-recommendations) — Elastic Security Labs
 
+## Documentation
+
+Full documentation including CLI reference, configuration, guardrails, and Cloud API: [estoppl.ai/docs](https://estoppl.ai/docs)
+
 ## License
 
 Apache 2.0
