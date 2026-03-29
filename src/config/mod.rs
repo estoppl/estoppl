@@ -176,6 +176,20 @@ impl Default for LedgerConfig {
     }
 }
 
+const DEFAULT_CLOUD_ENDPOINT: &str = "https://api.estoppl.ai/v1/events";
+
+impl LedgerConfig {
+    /// Returns the cloud endpoint, defaulting to https://api.estoppl.ai/v1/events
+    /// when cloud_api_key is set but cloud_endpoint is not.
+    pub fn effective_cloud_endpoint(&self) -> Option<&str> {
+        match &self.cloud_endpoint {
+            Some(ep) if !ep.is_empty() => Some(ep.as_str()),
+            _ if self.cloud_api_key.is_some() => Some(DEFAULT_CLOUD_ENDPOINT),
+            _ => None,
+        }
+    }
+}
+
 fn default_db_path() -> PathBuf {
     PathBuf::from(".estoppl/events.db")
 }
@@ -211,9 +225,5 @@ impl ProxyConfig {
             },
             ledger: LedgerConfig::default(),
         }
-    }
-
-    pub fn to_toml(&self) -> Result<String> {
-        toml::to_string_pretty(self).context("Failed to serialize config")
     }
 }

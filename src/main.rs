@@ -45,8 +45,8 @@ enum Commands {
         #[arg(long, num_args = 0..)]
         upstream_args: Vec<String>,
 
-        /// Stream signed events to the cloud endpoint configured in estoppl.toml.
-        #[arg(long)]
+        /// Legacy flag, ignored. Sync is auto-enabled when cloud_api_key is set in estoppl.toml.
+        #[arg(long, hide = true)]
         sync: bool,
 
         /// Path to estoppl config file.
@@ -64,8 +64,8 @@ enum Commands {
         #[arg(long, default_value = "127.0.0.1:4100")]
         listen: String,
 
-        /// Stream signed events to the cloud endpoint configured in estoppl.toml.
-        #[arg(long)]
+        /// Legacy flag, ignored. Sync is auto-enabled when cloud_api_key is set in estoppl.toml.
+        #[arg(long, hide = true)]
         sync: bool,
 
         /// Path to estoppl config file.
@@ -260,8 +260,24 @@ fn cmd_init(agent_id: &str) -> Result<()> {
         anyhow::bail!("estoppl.toml already exists. Remove it first to reinitialize.");
     }
 
-    // Write config.
-    let toml_str = config.to_toml()?;
+    // Write a clean config template (not raw serde output).
+    let toml_str = format!(
+        r#"[agent]
+id = "{agent_id}"
+version = "0.1.0"
+
+[rules]
+human_review_tools = ["wire_transfer", "execute_trade"]
+max_amount_usd = 50000.0
+amount_field = "amount"
+
+# Connect to estoppl cloud (https://app.estoppl.ai)
+# [ledger]
+# cloud_api_key = "sk_your_key"
+# org_id = "your_org_id"
+"#,
+        agent_id = agent_id,
+    );
     std::fs::write(&config_path, &toml_str)?;
     println!("Created estoppl.toml");
 
@@ -285,7 +301,7 @@ fn cmd_init(agent_id: &str) -> Result<()> {
 async fn cmd_start(
     upstream_cmd: &str,
     upstream_args: &[String],
-    sync_enabled: bool,
+    _sync_flag: bool,
     config_path: &Path,
 ) -> Result<()> {
     let config = config::ProxyConfig::load(config_path)?;
@@ -293,6 +309,9 @@ async fn cmd_start(
     let key_manager = identity::KeyManager::load_or_generate(&key_dir)?;
     let db_ledger = ledger::LocalLedger::open(&config.ledger.db_path)?;
     let policy_engine = policy::PolicyEngine::new(config.rules.clone());
+
+    // Auto-enable sync when cloud_api_key is configured.
+    let sync_enabled = config.ledger.cloud_api_key.is_some();
 
     tracing::info!(
         agent_id = config.agent.id,
@@ -302,7 +321,7 @@ async fn cmd_start(
 
     let policy_engine = Arc::new(policy_engine);
 
-    // Start cloud sync background task if --sync is enabled.
+    // Start cloud sync background task if cloud credentials are configured.
     let _sync_handle = maybe_start_sync(sync_enabled, &config)?;
     let _policy_handle =
         maybe_start_policy_sync(sync_enabled, &config, Arc::clone(&policy_engine))?;
@@ -328,7 +347,7 @@ async fn cmd_start(
 async fn cmd_start_http(
     upstream_url: &str,
     listen_addr: &str,
-    sync_enabled: bool,
+    _sync_flag: bool,
     config_path: &Path,
 ) -> Result<()> {
     let config = config::ProxyConfig::load(config_path)?;
@@ -336,6 +355,9 @@ async fn cmd_start_http(
     let key_manager = identity::KeyManager::load_or_generate(&key_dir)?;
     let db_ledger = ledger::LocalLedger::open(&config.ledger.db_path)?;
     let policy_engine = policy::PolicyEngine::new(config.rules.clone());
+
+    // Auto-enable sync when cloud_api_key is configured.
+    let sync_enabled = config.ledger.cloud_api_key.is_some();
 
     tracing::info!(
         agent_id = config.agent.id,
@@ -347,7 +369,7 @@ async fn cmd_start_http(
 
     let policy_engine = Arc::new(policy_engine);
 
-    // Start cloud sync background task if --sync is enabled.
+    // Start cloud sync background task if cloud credentials are configured.
     let _sync_handle = maybe_start_sync(sync_enabled, &config)?;
     let _policy_handle =
         maybe_start_policy_sync(sync_enabled, &config, Arc::clone(&policy_engine))?;
@@ -378,10 +400,7 @@ fn maybe_create_review_client(
         return None;
     }
 
-    let cloud_endpoint = config.ledger.cloud_endpoint.as_deref()?;
-    if cloud_endpoint.is_empty() {
-        return None;
-    }
+    let cloud_endpoint = config.ledger.effective_cloud_endpoint()?;
 
     // Derive base URL from events endpoint
     let base_url = cloud_endpoint
@@ -396,7 +415,7 @@ fn maybe_create_review_client(
     )))
 }
 
-/// Start the cloud sync background task if --sync is enabled and cloud_endpoint is configured.
+/// Start the cloud sync background task if cloud credentials are configured.
 /// Returns the task handle (kept alive by the caller) or None.
 fn maybe_start_sync(
     sync_enabled: bool,
@@ -406,19 +425,12 @@ fn maybe_start_sync(
         return Ok(None);
     }
 
-    let sync_config = sync::sync_config_from_ledger(
-        config.ledger.cloud_endpoint.as_deref(),
+    let sync_config = match sync::sync_config_from_ledger(
+        config.ledger.effective_cloud_endpoint(),
         config.ledger.cloud_api_key.as_deref(),
-    );
-
-    let sync_config = match sync_config {
+    ) {
         Some(c) => c,
-        None => {
-            anyhow::bail!(
-                "--sync requires [ledger] cloud_endpoint in estoppl.toml.\n\
-                 Example:\n  [ledger]\n  cloud_endpoint = \"https://api.estoppl.com/v1/events\"\n  cloud_api_key = \"sk_your_key\""
-            );
-        }
+        None => return Ok(None),
     };
 
     tracing::info!(endpoint = sync_config.endpoint, "Cloud sync enabled");
@@ -444,9 +456,9 @@ fn maybe_start_policy_sync(
         return Ok(None);
     }
 
-    let cloud_endpoint = match &config.ledger.cloud_endpoint {
-        Some(ep) if !ep.is_empty() => ep,
-        _ => return Ok(None),
+    let cloud_endpoint = match config.ledger.effective_cloud_endpoint() {
+        Some(ep) => ep.to_string(),
+        None => return Ok(None),
     };
 
     let org_id = match &config.ledger.org_id {
