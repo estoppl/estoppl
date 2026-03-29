@@ -260,7 +260,7 @@ pub async fn run_stdio_proxy(
                             // ALLOW (or HUMAN_REQUIRED without review client) — log and forward.
                             if matches!(&decision, PolicyDecision::HumanRequired { .. }) {
                                 tracing::warn!(
-                                    "HUMAN_REQUIRED but --sync not enabled; forwarding without review"
+                                    "HUMAN_REQUIRED but cloud sync not configured; forwarding without review"
                                 );
                             }
 

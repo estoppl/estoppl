@@ -61,8 +61,17 @@ fn estoppl_bin_path() -> String {
         .unwrap_or_else(|| "estoppl".to_string())
 }
 
+/// Resolve the absolute path to estoppl.toml in the current directory (if it exists).
+fn config_path() -> Option<String> {
+    std::env::current_dir()
+        .ok()
+        .map(|d| d.join("estoppl.toml"))
+        .filter(|p| p.exists())
+        .and_then(|p| p.to_str().map(String::from))
+}
+
 /// Wrap a single MCP client config. Returns (servers_wrapped, servers_skipped).
-fn wrap_config(config: &mut Value) -> (usize, usize) {
+fn wrap_config(config: &mut Value, config_path: Option<&str>) -> (usize, usize) {
     let mut wrapped = 0;
     let mut skipped = 0;
 
@@ -106,12 +115,14 @@ fn wrap_config(config: &mut Value) -> (usize, usize) {
         original.insert("args".to_string(), Value::Array(original_args.clone()));
         obj.insert("_estoppl_original".to_string(), Value::Object(original));
 
-        // Build new args: ["start", "--upstream-cmd", original_cmd, "--upstream-args", ...original_args]
-        let mut new_args: Vec<Value> = vec![
-            Value::String("start".to_string()),
-            Value::String("--upstream-cmd".to_string()),
-            Value::String(original_cmd),
-        ];
+        // Build new args: ["start", [--config <path>], "--upstream-cmd", original_cmd, "--upstream-args", ...original_args]
+        let mut new_args: Vec<Value> = vec![Value::String("start".to_string())];
+        if let Some(cp) = config_path {
+            new_args.push(Value::String("--config".to_string()));
+            new_args.push(Value::String(cp.to_string()));
+        }
+        new_args.push(Value::String("--upstream-cmd".to_string()));
+        new_args.push(Value::String(original_cmd));
         if !original_args.is_empty() {
             new_args.push(Value::String("--upstream-args".to_string()));
             new_args.extend(original_args);
@@ -168,6 +179,7 @@ fn restore_config(config: &mut Value) -> usize {
 /// Run the wrap command.
 pub fn run_wrap(dry_run: bool, restore: bool, client_filter: Option<&str>) -> Result<()> {
     let clients = detect_clients();
+    let cp = config_path();
     let mut found_any = false;
 
     for client in &clients {
@@ -211,7 +223,7 @@ pub fn run_wrap(dry_run: bool, restore: bool, client_filter: Option<&str>) -> Re
                 })?;
             }
 
-            let (wrapped, skipped) = wrap_config(&mut config);
+            let (wrapped, skipped) = wrap_config(&mut config, cp.as_deref());
             if wrapped == 0 {
                 println!(
                     "{}: no servers to wrap ({} already wrapped or HTTP-only)",
@@ -276,7 +288,7 @@ mod tests {
     #[test]
     fn wrap_transforms_stdio_servers() {
         let mut config = sample_config();
-        let (wrapped, skipped) = wrap_config(&mut config);
+        let (wrapped, skipped) = wrap_config(&mut config, None);
 
         assert_eq!(wrapped, 2); // stripe + github
         assert_eq!(skipped, 1); // remote (HTTP-only)
@@ -304,8 +316,8 @@ mod tests {
     #[test]
     fn wrap_is_idempotent() {
         let mut config = sample_config();
-        let (wrapped1, _) = wrap_config(&mut config);
-        let (wrapped2, skipped2) = wrap_config(&mut config);
+        let (wrapped1, _) = wrap_config(&mut config, None);
+        let (wrapped2, skipped2) = wrap_config(&mut config, None);
 
         assert_eq!(wrapped1, 2);
         assert_eq!(wrapped2, 0);
@@ -317,7 +329,7 @@ mod tests {
         let mut config = sample_config();
         let original = config.clone();
 
-        wrap_config(&mut config);
+        wrap_config(&mut config, None);
         assert_ne!(config, original);
 
         let restored = restore_config(&mut config);
@@ -348,7 +360,7 @@ mod tests {
                 }
             }
         });
-        let (wrapped, skipped) = wrap_config(&mut config);
+        let (wrapped, skipped) = wrap_config(&mut config, None);
         assert_eq!(wrapped, 0);
         assert_eq!(skipped, 1);
     }
@@ -356,7 +368,7 @@ mod tests {
     #[test]
     fn handles_empty_config() {
         let mut config = serde_json::json!({});
-        let (wrapped, skipped) = wrap_config(&mut config);
+        let (wrapped, skipped) = wrap_config(&mut config, None);
         assert_eq!(wrapped, 0);
         assert_eq!(skipped, 0);
     }

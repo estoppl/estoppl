@@ -198,8 +198,21 @@ impl ProxyConfig {
     pub fn load(path: &Path) -> Result<Self> {
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("Failed to read config: {}", path.display()))?;
-        toml::from_str(&content)
-            .with_context(|| format!("Failed to parse config: {}", path.display()))
+        let mut config: Self = toml::from_str(&content)
+            .with_context(|| format!("Failed to parse config: {}", path.display()))?;
+
+        // Resolve relative db_path against the config file's directory.
+        if config.ledger.db_path.is_relative() {
+            if let Some(config_dir) = path
+                .canonicalize()
+                .ok()
+                .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+            {
+                config.ledger.db_path = config_dir.join(&config.ledger.db_path);
+            }
+        }
+
+        Ok(config)
     }
 
     /// Generate a default config file.

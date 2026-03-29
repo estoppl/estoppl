@@ -112,9 +112,8 @@ max_amount_usd = 50000.0
 # Prevent runaway agents — max calls per tool per minute
 rate_limit_per_minute = 30
 
-[ledger]
-db_path = ".estoppl/events.db"
-# cloud_endpoint = "https://api.estoppl.ai/v1/events"
+# Connect to estoppl cloud (https://app.estoppl.ai)
+# [ledger]
 # cloud_api_key = "sk_your_key"
 # org_id = "your-org-id"
 ```
@@ -199,24 +198,19 @@ src/
 
 ## Cloud sync
 
-Stream signed events to a cloud endpoint for centralized monitoring:
+Add your cloud credentials to `estoppl.toml` and sync starts automatically:
 
-```bash
-estoppl start --upstream-cmd npx --upstream-args @stripe/mcp-server --sync
+```toml
+[ledger]
+cloud_api_key = "sk_your_key"
+org_id = "your-org-id"
 ```
 
 Events always persist locally first. Cloud sync is best-effort with exponential backoff, gap detection, and automatic reconciliation. See [ARCHITECTURE.md](ARCHITECTURE.md) for details on chain integrity under network partitions.
 
 ### Remote kill switch
 
-When `org_id` is configured and `--sync` is enabled, the proxy polls the cloud for policy updates every 5 seconds. If an admin blocks a tool in the cloud dashboard, every proxy in the org picks it up and starts rejecting that tool — no restart required.
-
-```toml
-[ledger]
-cloud_endpoint = "https://api.estoppl.ai/v1/events"
-cloud_api_key = "sk_your_key"
-org_id = "your-org-id"
-```
+When `cloud_api_key` and `org_id` are configured, the proxy polls the cloud for policy updates every 5 seconds. If an admin blocks a tool in the cloud dashboard, every proxy in the org picks it up and starts rejecting that tool — no restart required.
 
 ## Roadmap
 

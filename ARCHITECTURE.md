@@ -90,7 +90,7 @@ Both modes use the same `log_event` function in `proxy/mod.rs`. The `tool_server
 
 ### Cloud sync
 
-The `--sync` flag spawns a background `CloudSyncer` that polls local SQLite for unsynced events and POSTs batches to the cloud endpoint.
+When `cloud_api_key` is configured in `estoppl.toml`, the proxy automatically spawns a background `CloudSyncer` that polls local SQLite for unsynced events and POSTs batches to the cloud endpoint.
 
 - Uses a `sync_state` table with a rowid watermark
 - Events always persist locally first; cloud sync is best-effort

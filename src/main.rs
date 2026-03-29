@@ -42,7 +42,7 @@ enum Commands {
         upstream_cmd: String,
 
         /// Arguments to pass to the upstream command.
-        #[arg(long, num_args = 0..)]
+        #[arg(long, num_args = 0.., allow_hyphen_values = true)]
         upstream_args: Vec<String>,
 
         /// Legacy flag, ignored. Sync is auto-enabled when cloud_api_key is set in estoppl.toml.
@@ -173,7 +173,7 @@ enum Commands {
         upstream_cmd: String,
 
         /// Arguments to pass to the upstream command.
-        #[arg(long, num_args = 0..)]
+        #[arg(long, num_args = 0.., allow_hyphen_values = true)]
         upstream_args: Vec<String>,
 
         /// Number of tool calls to send.
@@ -446,7 +446,7 @@ fn maybe_start_sync(
     Ok(Some(handle))
 }
 
-/// Start the policy sync background task if --sync is enabled and org_id is configured.
+/// Start the policy sync background task if cloud sync is enabled and org_id is configured.
 fn maybe_start_policy_sync(
     sync_enabled: bool,
     config: &config::ProxyConfig,
