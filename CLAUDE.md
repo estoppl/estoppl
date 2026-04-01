@@ -43,7 +43,7 @@ src/
 │   └── http.rs      run_http_proxy — HTTP/SSE reverse proxy (axum, MCP Streamable HTTP)
 ├── sync/mod.rs      CloudSyncer — background sync with chain metadata, gap reconciliation, partition recovery
 ├── report/mod.rs    HTML activity report generator
-├── wrap/mod.rs      Auto-wrap MCP client configs (Claude Desktop, Cursor, Windsurf)
+├── wrap/mod.rs      Auto-wrap MCP client configs (Claude Desktop, Cursor, Windsurf — Windsurf untested)
 └── dashboard/
     ├── mod.rs       Local web dashboard server (axum, JSON API)
     └── static/

@@ -61,7 +61,7 @@ cargo install estoppl
 
 ```bash
 estoppl init --agent-id my-agent
-estoppl wrap                    # auto-wraps Claude Desktop, Cursor, Windsurf configs
+estoppl wrap                    # auto-wraps Claude Desktop and Cursor configs
 estoppl tail                    # live-stream tool calls as they happen
 ```
 
@@ -141,7 +141,7 @@ Drop the proxy into your MCP client config:
 }
 ```
 
-Or just run `estoppl wrap` to do this automatically for Claude Desktop, Cursor, and Windsurf.
+Or just run `estoppl wrap` to do this automatically for Claude Desktop and Cursor.
 
 ### HTTP mode (remote MCP servers)
 
@@ -157,7 +157,7 @@ estoppl start-http --upstream-url https://mcp.stripe.com/v1
 | `estoppl init` | Initialize config, keypair, and database |
 | `estoppl start` | Start stdio proxy (wraps a local MCP server) |
 | `estoppl start-http` | Start HTTP proxy (reverse proxy for remote MCP) |
-| `estoppl wrap` | Auto-wrap MCP client configs (Claude Desktop, Cursor, Windsurf) |
+| `estoppl wrap` | Auto-wrap MCP client configs (Claude Desktop, Cursor) |
 | `estoppl wrap --client claude` | Wrap only Claude Desktop (also accepts `claude-desktop`) |
 | `estoppl unwrap` | Restore original MCP client configs |
 | `estoppl audit` | View audit log with filters (`--tool`, `--decision`, `--since`) |
@@ -234,7 +234,7 @@ Sign up at [app.estoppl.ai](https://app.estoppl.ai) or reach out at [tina@estopp
 - [x] stdio + HTTP/SSE proxy modes (full MCP Streamable HTTP transport)
 - [x] Guardrails: allow lists, block lists, wildcards, amount thresholds, rate limiting
 - [x] Ed25519 signed, hash-chained audit log
-- [x] `estoppl wrap` — one-command setup for Claude Desktop, Cursor, Windsurf
+- [x] `estoppl wrap` — one-command setup for Claude Desktop, Cursor
 - [x] Cloud sync with chain verification and gap reconciliation
 - [x] Remote kill switch — cloud-managed policy hot-reload
 - [x] Attestation header (`X-Estoppl-Attestation`) on forwarded HTTP requests
