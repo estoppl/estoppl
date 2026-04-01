@@ -192,10 +192,12 @@ pub fn run_wrap(dry_run: bool, restore: bool, client_filter: Option<&str>) -> Re
     let mut found_any = false;
 
     for client in &clients {
-        if let Some(filter) = client_filter
-            && !client.name.to_lowercase().contains(&filter.to_lowercase())
-        {
-            continue;
+        if let Some(filter) = client_filter {
+            let name = client.name.to_lowercase();
+            let f = filter.to_lowercase().replace("-", " ");
+            if !name.contains(&f) && !name.replace(" ", "-").contains(&filter.to_lowercase()) {
+                continue;
+            }
         }
 
         if !client.config_path.exists() {
