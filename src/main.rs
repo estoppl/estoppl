@@ -206,7 +206,12 @@ async fn main() -> Result<()> {
             upstream_args,
             sync,
             config,
-        } => cmd_start(&upstream_cmd, &upstream_args, sync, &config).await?,
+        } => {
+            if let Err(e) = cmd_start(&upstream_cmd, &upstream_args, sync, &config).await {
+                eprintln!("Error: {:#}", e);
+                return Err(e);
+            }
+        }
         Commands::StartHttp {
             upstream_url,
             listen,
@@ -305,7 +310,11 @@ async fn cmd_start(
     config_path: &Path,
 ) -> Result<()> {
     let config = config::ProxyConfig::load(config_path)?;
-    let key_dir = PathBuf::from(".estoppl/keys");
+    // Resolve key_dir relative to config file's directory (not cwd).
+    // MCP clients like Claude Desktop launch subprocesses with cwd=/ which
+    // would fail with "Read-only file system" if we used a relative path.
+    let config_dir = config_path.parent().unwrap_or(Path::new("."));
+    let key_dir = config_dir.join(".estoppl/keys");
     let key_manager = identity::KeyManager::load_or_generate(&key_dir)?;
     let db_ledger = ledger::LocalLedger::open(&config.ledger.db_path)?;
     let policy_engine = policy::PolicyEngine::new(config.rules.clone());
@@ -351,7 +360,8 @@ async fn cmd_start_http(
     config_path: &Path,
 ) -> Result<()> {
     let config = config::ProxyConfig::load(config_path)?;
-    let key_dir = PathBuf::from(".estoppl/keys");
+    let config_dir = config_path.parent().unwrap_or(Path::new("."));
+    let key_dir = config_dir.join(".estoppl/keys");
     let key_manager = identity::KeyManager::load_or_generate(&key_dir)?;
     let db_ledger = ledger::LocalLedger::open(&config.ledger.db_path)?;
     let policy_engine = policy::PolicyEngine::new(config.rules.clone());
