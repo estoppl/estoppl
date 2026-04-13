@@ -40,6 +40,7 @@ impl ReviewClient {
         input_hash: &str,
         proxy_key_id: &str,
         timeout_sec: u64,
+        input_data: Option<serde_json::Value>,
     ) -> Result<()> {
         let url = format!("{}/v1/review", self.base_url);
 
@@ -50,6 +51,7 @@ impl ReviewClient {
             "input_hash": input_hash,
             "proxy_key_id": proxy_key_id,
             "timeout_sec": timeout_sec,
+            "input_data": input_data,
         });
 
         let mut req = self

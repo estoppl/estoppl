@@ -235,11 +235,12 @@ pub async fn run_stdio_proxy(
                             let ih = input_hash.clone();
                             let aid = agent_id.to_string();
                             let pkid = key_manager.key_id.clone();
+                            let review_input_data = input_data.clone();
 
                             review_futures.push(Box::pin(async move {
                                 // Submit review request to cloud
                                 if let Err(e) = rc.submit_review(
-                                    &event_id, &tn, &aid, &ih, &pkid, 300,
+                                    &event_id, &tn, &aid, &ih, &pkid, 300, review_input_data,
                                 ).await {
                                     tracing::warn!(error = %e, "Failed to submit review");
                                 }
