@@ -361,15 +361,12 @@ async fn cmd_connect(org_id: &str, config_path: &Path) -> Result<()> {
         Ok(r) if r.status().is_success() || r.status().as_u16() == 304 => {
             println!("Credentials verified.");
         }
-        Ok(r) if r.status().as_u16() == 401 || r.status().as_u16() == 403 => {
-            anyhow::bail!(
-                "Invalid API key or org ID. Check your credentials at app.estoppl.ai/settings"
-            );
-        }
         Ok(r) => {
-            // Non-auth errors (404, 500) — the cloud might not have a policy yet, which is fine.
-            tracing::debug!("Policy endpoint returned {}, proceeding anyway", r.status());
-            println!("Credentials accepted (no policy configured yet — that's OK).");
+            let status = r.status().as_u16();
+            anyhow::bail!(
+                "Credential verification failed (HTTP {}). Check your API key and org ID at app.estoppl.ai/settings",
+                status
+            );
         }
         Err(e) if e.is_connect() || e.is_timeout() => {
             anyhow::bail!(
