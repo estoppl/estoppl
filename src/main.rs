@@ -362,7 +362,9 @@ async fn cmd_connect(org_id: &str, config_path: &Path) -> Result<()> {
             println!("Credentials verified.");
         }
         Ok(r) if r.status().as_u16() == 401 || r.status().as_u16() == 403 => {
-            anyhow::bail!("Invalid API key or org ID. Check your credentials at app.estoppl.ai/settings");
+            anyhow::bail!(
+                "Invalid API key or org ID. Check your credentials at app.estoppl.ai/settings"
+            );
         }
         Ok(r) => {
             // Non-auth errors (404, 500) — the cloud might not have a policy yet, which is fine.
@@ -398,8 +400,13 @@ async fn cmd_connect(org_id: &str, config_path: &Path) -> Result<()> {
     let tmp_path = config_path.with_extension("toml.tmp");
     std::fs::write(&tmp_path, &updated)
         .with_context(|| format!("Failed to write {}", tmp_path.display()))?;
-    std::fs::rename(&tmp_path, config_path)
-        .with_context(|| format!("Failed to rename {} to {}", tmp_path.display(), config_path.display()))?;
+    std::fs::rename(&tmp_path, config_path).with_context(|| {
+        format!(
+            "Failed to rename {} to {}",
+            tmp_path.display(),
+            config_path.display()
+        )
+    })?;
 
     println!("Updated {}", config_path.display());
     println!();

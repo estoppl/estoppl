@@ -272,11 +272,7 @@ fn test_wrap_dry_run() {
     .unwrap();
 
     // Create estoppl.toml so wrap doesn't abort
-    std::fs::write(
-        dir.path().join("estoppl.toml"),
-        "[agent]\nid = \"test\"\n",
-    )
-    .unwrap();
+    std::fs::write(dir.path().join("estoppl.toml"), "[agent]\nid = \"test\"\n").unwrap();
 
     // wrap --dry-run shouldn't modify the file
     let output = Command::new(estoppl_bin())
@@ -314,11 +310,7 @@ fn test_wrap_no_configs_found() {
     let dir = tempfile::TempDir::new().unwrap();
 
     // Create estoppl.toml so wrap doesn't abort on missing config
-    std::fs::write(
-        dir.path().join("estoppl.toml"),
-        "[agent]\nid = \"test\"\n",
-    )
-    .unwrap();
+    std::fs::write(dir.path().join("estoppl.toml"), "[agent]\nid = \"test\"\n").unwrap();
 
     let output = Command::new(estoppl_bin())
         .args(["wrap"])
