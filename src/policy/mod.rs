@@ -340,6 +340,7 @@ mod tests {
             human_review_above_usd: None,
             agent_rules: HashMap::new(),
             custom_rules: vec![],
+            fail_mode: crate::config::FailMode::Closed,
         }
     }
 

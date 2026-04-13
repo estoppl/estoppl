@@ -62,6 +62,7 @@ pub async fn run_stdio_proxy(
     policy: &PolicyEngine,
     review_client: Option<Arc<ReviewClient>>,
     redact_fields: &[String],
+    fail_mode: &crate::config::FailMode,
 ) -> Result<()> {
     let session_id = Uuid::now_v7().to_string();
 
@@ -256,10 +257,12 @@ pub async fn run_stdio_proxy(
                             host_line.clear();
                             continue;
                         }
-                        _ if matches!(&decision, PolicyDecision::HumanRequired { .. }) => {
-                            // HUMAN_REQUIRED without review client — fail closed.
+                        _ if matches!(&decision, PolicyDecision::HumanRequired { .. })
+                            && *fail_mode != crate::config::FailMode::Open =>
+                        {
+                            // HUMAN_REQUIRED without review client, fail_mode=closed (default).
                             tracing::error!(
-                                "HUMAN_REQUIRED but cloud sync not configured; blocking call (fail-closed)"
+                                "HUMAN_REQUIRED but cloud not configured; blocking call (fail_mode=closed)"
                             );
                             let block_decision = PolicyDecision::Block {
                                 rule: "human review requires cloud connection".to_string(),
@@ -290,7 +293,12 @@ pub async fn run_stdio_proxy(
                             continue;
                         }
                         _ => {
-                            // ALLOW — log and forward.
+                            // ALLOW (or HUMAN_REQUIRED with fail_mode=open) — log and forward.
+                            if matches!(&decision, PolicyDecision::HumanRequired { .. }) {
+                                tracing::warn!(
+                                    "HUMAN_REQUIRED but cloud not configured; forwarding (fail_mode=open)"
+                                );
+                            }
 
                             let event_id = super::log_event(
                                 ledger, key_manager, &session_id,

@@ -275,6 +275,7 @@ version = "0.1.0"
 human_review_tools = ["wire_transfer", "execute_trade"]
 max_amount_usd = 50000.0
 amount_field = "amount"
+# fail_mode = "closed"  # "closed" (default, blocks if cloud unavailable) or "open" (dev only, forwards with warning)
 
 # Connect to estoppl cloud (https://app.estoppl.ai)
 [ledger]
@@ -354,6 +355,7 @@ async fn cmd_start(
         &policy_engine,
         review_client.clone(),
         &config.rules.redact_fields,
+        &config.rules.fail_mode,
     )
     .await
 }

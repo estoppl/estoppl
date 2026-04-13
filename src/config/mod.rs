@@ -68,6 +68,21 @@ pub struct RulesConfig {
     /// These allow arbitrary field checks on tool arguments.
     #[serde(default)]
     pub custom_rules: Vec<CustomRule>,
+    /// Behavior when human review is required but cloud is not configured.
+    /// "closed" (default) = block the call. "open" = forward with warning (dev only).
+    #[serde(default)]
+    pub fail_mode: FailMode,
+}
+
+/// Fail mode when human review cannot be performed (no cloud connection).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum FailMode {
+    /// Block the call (secure default). Recommended for production.
+    #[default]
+    Closed,
+    /// Forward the call with a warning. For development/testing only.
+    Open,
 }
 
 /// A custom conditional rule that checks a field in tool arguments.
@@ -235,6 +250,7 @@ impl ProxyConfig {
                 human_review_above_usd: None,
                 agent_rules: std::collections::HashMap::new(),
                 custom_rules: vec![],
+                fail_mode: FailMode::Closed,
             },
             ledger: LedgerConfig::default(),
         }
