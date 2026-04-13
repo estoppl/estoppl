@@ -10,6 +10,17 @@ pub enum ReviewOutcome {
     Expired,
 }
 
+/// Parameters for submitting a review request.
+pub struct ReviewRequest {
+    pub event_id: String,
+    pub tool_name: String,
+    pub agent_id: String,
+    pub input_hash: String,
+    pub proxy_key_id: String,
+    pub timeout_sec: u64,
+    pub input_data: Option<serde_json::Value>,
+}
+
 /// Client for communicating with the cloud review API.
 pub struct ReviewClient {
     http_client: reqwest::Client,
@@ -32,26 +43,17 @@ impl ReviewClient {
     }
 
     /// Submit a review request to the cloud.
-    pub async fn submit_review(
-        &self,
-        event_id: &str,
-        tool_name: &str,
-        agent_id: &str,
-        input_hash: &str,
-        proxy_key_id: &str,
-        timeout_sec: u64,
-        input_data: Option<serde_json::Value>,
-    ) -> Result<()> {
+    pub async fn submit_review(&self, req: ReviewRequest) -> Result<()> {
         let url = format!("{}/v1/review", self.base_url);
 
         let payload = serde_json::json!({
-            "event_id": event_id,
-            "tool_name": tool_name,
-            "agent_id": agent_id,
-            "input_hash": input_hash,
-            "proxy_key_id": proxy_key_id,
-            "timeout_sec": timeout_sec,
-            "input_data": input_data,
+            "event_id": req.event_id,
+            "tool_name": req.tool_name,
+            "agent_id": req.agent_id,
+            "input_hash": req.input_hash,
+            "proxy_key_id": req.proxy_key_id,
+            "timeout_sec": req.timeout_sec,
+            "input_data": req.input_data,
         });
 
         let mut req = self

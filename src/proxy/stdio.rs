@@ -232,16 +232,20 @@ pub async fn run_stdio_proxy(
                             let held_request = host_line.clone();
                             let req_id = req.id.clone();
                             let tn = tool_name.clone();
-                            let ih = input_hash.clone();
-                            let aid = agent_id.to_string();
-                            let pkid = key_manager.key_id.clone();
-                            let review_input_data = input_data.clone();
+
+                            let review_req = crate::review::ReviewRequest {
+                                event_id: event_id.clone(),
+                                tool_name: tool_name.clone(),
+                                agent_id: agent_id.to_string(),
+                                input_hash: input_hash.clone(),
+                                proxy_key_id: key_manager.key_id.clone(),
+                                timeout_sec: 300,
+                                input_data: input_data.clone(),
+                            };
 
                             review_futures.push(Box::pin(async move {
                                 // Submit review request to cloud
-                                if let Err(e) = rc.submit_review(
-                                    &event_id, &tn, &aid, &ih, &pkid, 300, review_input_data,
-                                ).await {
+                                if let Err(e) = rc.submit_review(review_req).await {
                                     tracing::warn!(error = %e, "Failed to submit review");
                                 }
 
