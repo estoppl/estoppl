@@ -297,7 +297,12 @@ amount_field = "amount"
     println!("Initialized database at {}", db_path.display());
 
     println!();
-    println!("Ready. Start the proxy with:");
+    println!("Next steps:");
+    println!("  1. Connect to estoppl cloud:  estoppl connect");
+    println!("  2. Wrap your MCP servers:     estoppl wrap");
+    println!("  3. Restart your IDE (Cursor, Claude Desktop)");
+    println!();
+    println!("Or start manually:");
     println!("  estoppl start --upstream-cmd <your-mcp-server-command>        (stdio mode)");
     println!("  estoppl start-http --upstream-url <http://host:port/mcp>      (HTTP mode)");
     Ok(())

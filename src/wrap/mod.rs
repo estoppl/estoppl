@@ -191,6 +191,16 @@ pub fn run_wrap(dry_run: bool, restore: bool, client_filter: Option<&str>) -> Re
     let cp = config_path();
     let mut found_any = false;
 
+    if !restore && cp.is_none() {
+        anyhow::bail!(
+            "estoppl.toml not found in current directory ({}). \
+             Run `estoppl init` first, or `cd` to the directory containing estoppl.toml.",
+            std::env::current_dir()
+                .map(|d| d.display().to_string())
+                .unwrap_or_else(|_| "unknown".to_string())
+        );
+    }
+
     for client in &clients {
         if let Some(filter) = client_filter {
             let name = client.name.to_lowercase();
@@ -269,6 +279,9 @@ pub fn run_wrap(dry_run: bool, restore: bool, client_filter: Option<&str>) -> Re
         for client in &clients {
             println!("  {}: {}", client.name, client.config_path.display());
         }
+    } else if !dry_run && !restore {
+        println!();
+        println!("Restart your IDE (Cursor, Claude Desktop) to activate estoppl.");
     }
 
     Ok(())

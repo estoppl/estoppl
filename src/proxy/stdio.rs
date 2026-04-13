@@ -256,13 +256,41 @@ pub async fn run_stdio_proxy(
                             host_line.clear();
                             continue;
                         }
+                        _ if matches!(&decision, PolicyDecision::HumanRequired { .. }) => {
+                            // HUMAN_REQUIRED without review client — fail closed.
+                            tracing::error!(
+                                "HUMAN_REQUIRED but cloud sync not configured; blocking call (fail-closed)"
+                            );
+                            let block_decision = PolicyDecision::Block {
+                                rule: "human review requires cloud connection".to_string(),
+                            };
+
+                            super::log_event(
+                                ledger, key_manager, &session_id,
+                                agent_id, agent_version, authorized_by,
+                                super::EventParams {
+                                    tool_name: &tool_name, tool_server: "stdio",
+                                    input_hash: &input_hash, output_hash: "",
+                                    input_data: input_data.clone(), output_data: None,
+                                    decision: &block_decision, latency_ms: 0,
+                                },
+                            )?;
+
+                            let error_resp = JsonRpcResponse::error(
+                                req.id.clone(),
+                                -32001,
+                                "Blocked: human review requires cloud connection. Configure cloud_api_key in estoppl.toml.".to_string(),
+                            );
+                            let error_json = serde_json::to_string(&error_resp)?;
+                            host_stdout.write_all(error_json.as_bytes()).await?;
+                            host_stdout.write_all(b"\n").await?;
+                            host_stdout.flush().await?;
+
+                            host_line.clear();
+                            continue;
+                        }
                         _ => {
-                            // ALLOW (or HUMAN_REQUIRED without review client) — log and forward.
-                            if matches!(&decision, PolicyDecision::HumanRequired { .. }) {
-                                tracing::warn!(
-                                    "HUMAN_REQUIRED but cloud sync not configured; forwarding without review"
-                                );
-                            }
+                            // ALLOW — log and forward.
 
                             let event_id = super::log_event(
                                 ledger, key_manager, &session_id,

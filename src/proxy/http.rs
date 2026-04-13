@@ -190,6 +190,31 @@ async fn handle_post(state: Arc<ProxyState>, headers: HeaderMap, body: Bytes) ->
                         format!("Blocked by policy: {}", rule),
                     ));
                 }
+                _ if matches!(&decision, PolicyDecision::HumanRequired { .. }) => {
+                    // HUMAN_REQUIRED without review client wired up — fail closed.
+                    tracing::error!(
+                        "HUMAN_REQUIRED but review not implemented in HTTP mode; blocking call (fail-closed)"
+                    );
+                    let block_decision = PolicyDecision::Block {
+                        rule: "human review requires cloud connection".to_string(),
+                    };
+                    state.log_event(super::EventParams {
+                        tool_name: &tool_name,
+                        tool_server: &state.upstream_url,
+                        input_hash: &input_hash,
+                        output_hash: "",
+                        input_data: None,
+                        output_data: None,
+                        decision: &block_decision,
+                        latency_ms: 0,
+                    });
+
+                    blocked_responses.push(JsonRpcResponse::error(
+                        req.id.clone(),
+                        -32001,
+                        "Blocked: human review requires cloud connection. Configure cloud_api_key in estoppl.toml.".to_string(),
+                    ));
+                }
                 _ => {
                     let req_id_key = req.id.as_ref().map(|v| v.to_string()).unwrap_or_default();
 
