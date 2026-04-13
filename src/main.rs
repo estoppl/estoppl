@@ -35,6 +35,18 @@ enum Commands {
         agent_id: String,
     },
 
+    /// Connect the proxy to estoppl cloud. Writes API key and org ID to estoppl.toml.
+    /// API key is read from stdin or prompted interactively (never passed as a CLI flag).
+    Connect {
+        /// Organization ID from the estoppl cloud dashboard.
+        #[arg(long)]
+        org_id: String,
+
+        /// Path to estoppl config file.
+        #[arg(long, short, default_value = "estoppl.toml")]
+        config: PathBuf,
+    },
+
     /// Start the stdio proxy — intercepts MCP tool calls between agent and upstream server process.
     Start {
         /// Command to launch the upstream MCP server.
@@ -201,6 +213,7 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Init { agent_id } => cmd_init(&agent_id)?,
+        Commands::Connect { org_id, config } => cmd_connect(&org_id, &config).await?,
         Commands::Start {
             upstream_cmd,
             upstream_args,
@@ -307,6 +320,151 @@ amount_field = "amount"
     println!("  estoppl start --upstream-cmd <your-mcp-server-command>        (stdio mode)");
     println!("  estoppl start-http --upstream-url <http://host:port/mcp>      (HTTP mode)");
     Ok(())
+}
+
+async fn cmd_connect(org_id: &str, config_path: &Path) -> Result<()> {
+    use std::io::{self, BufRead, Write};
+
+    // Read API key securely: interactive prompt (no echo) if TTY, else stdin pipe.
+    let api_key = if atty::is(atty::Stream::Stdin) {
+        eprint!("Enter your estoppl API key: ");
+        io::stderr().flush()?;
+        rpassword::read_password().context("Failed to read API key")?
+    } else {
+        let stdin = io::stdin();
+        let mut line = String::new();
+        stdin.lock().read_line(&mut line)?;
+        line.trim().to_string()
+    };
+
+    if api_key.is_empty() {
+        anyhow::bail!("API key cannot be empty");
+    }
+
+    // Verify the key works by pinging the policy endpoint.
+    let base_url = "https://api.estoppl.ai";
+    let verify_url = format!("{}/v1/policy/{}", base_url, org_id);
+    println!("Verifying credentials...");
+
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .timeout(std::time::Duration::from_secs(10))
+        .build()?;
+
+    let resp = client
+        .get(&verify_url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .send()
+        .await;
+
+    match resp {
+        Ok(r) if r.status().is_success() || r.status().as_u16() == 304 => {
+            println!("Credentials verified.");
+        }
+        Ok(r) if r.status().as_u16() == 401 || r.status().as_u16() == 403 => {
+            anyhow::bail!("Invalid API key or org ID. Check your credentials at app.estoppl.ai/settings");
+        }
+        Ok(r) => {
+            // Non-auth errors (404, 500) — the cloud might not have a policy yet, which is fine.
+            tracing::debug!("Policy endpoint returned {}, proceeding anyway", r.status());
+            println!("Credentials accepted (no policy configured yet — that's OK).");
+        }
+        Err(e) if e.is_connect() || e.is_timeout() => {
+            anyhow::bail!(
+                "Could not reach api.estoppl.ai: {}. Check your internet connection.",
+                e
+            );
+        }
+        Err(e) => {
+            anyhow::bail!("Failed to verify credentials: {}", e);
+        }
+    }
+
+    // Read existing TOML or create minimal config.
+    let toml_content = if config_path.exists() {
+        std::fs::read_to_string(config_path)
+            .with_context(|| format!("Failed to read {}", config_path.display()))?
+    } else {
+        // Create minimal config if none exists.
+        println!("No estoppl.toml found — creating one.");
+        "[agent]\nid = \"my-agent\"\n\n[rules]\n\n[ledger]\n".to_string()
+    };
+
+    // Update the [ledger] section with cloud credentials.
+    // Strategy: replace commented-out placeholders or append to [ledger] section.
+    let updated = update_toml_ledger(&toml_content, &api_key, org_id);
+
+    // Atomic write: write to temp file, then rename.
+    let tmp_path = config_path.with_extension("toml.tmp");
+    std::fs::write(&tmp_path, &updated)
+        .with_context(|| format!("Failed to write {}", tmp_path.display()))?;
+    std::fs::rename(&tmp_path, config_path)
+        .with_context(|| format!("Failed to rename {} to {}", tmp_path.display(), config_path.display()))?;
+
+    println!("Updated {}", config_path.display());
+    println!();
+    println!("Next steps:");
+    println!("  1. Wrap your MCP servers:  estoppl wrap");
+    println!("  2. Restart your IDE (Cursor, Claude Desktop)");
+    Ok(())
+}
+
+/// Update the [ledger] section of a TOML string with cloud credentials.
+/// Handles both commented-out placeholders and missing fields.
+fn update_toml_ledger(toml_content: &str, api_key: &str, org_id: &str) -> String {
+    let mut lines: Vec<String> = toml_content.lines().map(String::from).collect();
+    let mut found_api_key = false;
+    let mut found_org_id = false;
+    let mut ledger_section_idx = None;
+
+    for (i, line) in lines.iter_mut().enumerate() {
+        let is_ledger_header = line.trim() == "[ledger]";
+        let is_api_key_line = line.trim().starts_with("# cloud_api_key")
+            || line.trim().starts_with("#cloud_api_key")
+            || line.trim().starts_with("cloud_api_key");
+        let is_org_id_line = line.trim().starts_with("# org_id")
+            || line.trim().starts_with("#org_id")
+            || line.trim().starts_with("org_id");
+
+        if is_ledger_header {
+            ledger_section_idx = Some(i);
+        }
+
+        if is_api_key_line {
+            *line = format!("cloud_api_key = \"{}\"", api_key);
+            found_api_key = true;
+        }
+
+        if is_org_id_line {
+            *line = format!("org_id = \"{}\"", org_id);
+            found_org_id = true;
+        }
+    }
+
+    // If we found the [ledger] section but the keys weren't there, append them.
+    if let Some(idx) = ledger_section_idx {
+        if !found_api_key {
+            lines.insert(idx + 1, format!("cloud_api_key = \"{}\"", api_key));
+            found_api_key = true;
+        }
+        if !found_org_id {
+            // Find where we just inserted api_key (or after [ledger]).
+            let insert_at = if found_api_key { idx + 2 } else { idx + 1 };
+            lines.insert(insert_at, format!("org_id = \"{}\"", org_id));
+        }
+    } else {
+        // No [ledger] section at all — append one.
+        lines.push(String::new());
+        lines.push("[ledger]".to_string());
+        lines.push(format!("cloud_api_key = \"{}\"", api_key));
+        lines.push(format!("org_id = \"{}\"", org_id));
+    }
+
+    let mut result = lines.join("\n");
+    if !result.ends_with('\n') {
+        result.push('\n');
+    }
+    result
 }
 
 async fn cmd_start(
@@ -1266,5 +1424,66 @@ fn truncate(s: &str, max: usize) -> String {
         format!("{}...", &s[..max - 3])
     } else {
         s.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_update_toml_with_commented_placeholders() {
+        let input = r#"[agent]
+id = "my-agent"
+
+[rules]
+
+[ledger]
+# cloud_api_key = "sk_your_key"
+# org_id = "your_org_id"
+"#;
+        let result = update_toml_ledger(input, "sk_live_abc", "org_123");
+        assert!(result.contains("cloud_api_key = \"sk_live_abc\""));
+        assert!(result.contains("org_id = \"org_123\""));
+        assert!(!result.contains("# cloud_api_key"));
+        assert!(!result.contains("# org_id"));
+    }
+
+    #[test]
+    fn test_update_toml_with_existing_values() {
+        let input = r#"[agent]
+id = "my-agent"
+
+[ledger]
+cloud_api_key = "sk_old_key"
+org_id = "org_old"
+"#;
+        let result = update_toml_ledger(input, "sk_new_key", "org_new");
+        assert!(result.contains("cloud_api_key = \"sk_new_key\""));
+        assert!(result.contains("org_id = \"org_new\""));
+        assert!(!result.contains("sk_old_key"));
+    }
+
+    #[test]
+    fn test_update_toml_with_empty_ledger() {
+        let input = r#"[agent]
+id = "my-agent"
+
+[ledger]
+"#;
+        let result = update_toml_ledger(input, "sk_key", "org_id");
+        assert!(result.contains("cloud_api_key = \"sk_key\""));
+        assert!(result.contains("org_id = \"org_id\""));
+    }
+
+    #[test]
+    fn test_update_toml_no_ledger_section() {
+        let input = r#"[agent]
+id = "my-agent"
+"#;
+        let result = update_toml_ledger(input, "sk_key", "org_id");
+        assert!(result.contains("[ledger]"));
+        assert!(result.contains("cloud_api_key = \"sk_key\""));
+        assert!(result.contains("org_id = \"org_id\""));
     }
 }

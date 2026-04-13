@@ -56,6 +56,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 # Error handling
 anyhow = "1"
 thiserror = "2"
+rpassword = "5"
+atty = "0.2.14"
 
 [dev-dependencies]
 tempfile = "3"
