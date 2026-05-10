@@ -17,10 +17,10 @@
 //     inconsistently across languages). The subscore VALUES are signed.
 //   - Cosmetic fields (verify_command, methodology_url).
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use base64::Engine;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -33,8 +33,8 @@ pub async fn cmd_verify_certificate(
 ) -> Result<()> {
     let cert_json = std::fs::read_to_string(cert_path)
         .with_context(|| format!("Failed to read certificate: {}", cert_path.display()))?;
-    let cert: Value = serde_json::from_str(&cert_json)
-        .with_context(|| "Certificate file is not valid JSON")?;
+    let cert: Value =
+        serde_json::from_str(&cert_json).with_context(|| "Certificate file is not valid JSON")?;
 
     let public_key_id = cert
         .get("public_key_id")
@@ -69,12 +69,23 @@ pub async fn cmd_verify_certificate(
 
     pubkey
         .verify(canonical.as_bytes(), &signature)
-        .map_err(|e| anyhow!("signature INVALID: {} — cert may be tampered or signed by a different key", e))?;
+        .map_err(|e| {
+            anyhow!(
+                "signature INVALID: {} — cert may be tampered or signed by a different key",
+                e
+            )
+        })?;
 
     println!("VALID");
-    println!("  certificate_id:      {}", str_field(&cert, "certificate_id"));
+    println!(
+        "  certificate_id:      {}",
+        str_field(&cert, "certificate_id")
+    );
     println!("  deployer_id:         {}", str_field(&cert, "deployer_id"));
-    println!("  deployer_name:       {}", str_field(&cert, "deployer_name"));
+    println!(
+        "  deployer_name:       {}",
+        str_field(&cert, "deployer_name")
+    );
     println!(
         "  score:               {} ({})",
         cert.get("score").map(|v| v.to_string()).unwrap_or_default(),
@@ -92,12 +103,21 @@ pub async fn cmd_verify_certificate(
             .map(|v| v.to_string())
             .unwrap_or_default()
     );
-    println!("  methodology_version: {}", str_field(&cert, "methodology_version"));
-    println!("  aarm_version:        {}", str_field(&cert, "aarm_version"));
+    println!(
+        "  methodology_version: {}",
+        str_field(&cert, "methodology_version")
+    );
+    println!(
+        "  aarm_version:        {}",
+        str_field(&cert, "aarm_version")
+    );
     println!("  issued_at:           {}", str_field(&cert, "issued_at"));
     println!("  valid_until:         {}", str_field(&cert, "valid_until"));
     println!("  signed_by_kid:       {}", public_key_id);
-    println!("  evidence_url:        {}", str_field(&cert, "evidence_url"));
+    println!(
+        "  evidence_url:        {}",
+        str_field(&cert, "evidence_url")
+    );
 
     Ok(())
 }
@@ -111,12 +131,24 @@ fn str_field<'a>(cert: &'a Value, field: &str) -> &'a str {
 fn build_signable_canonical_json(cert: &Value) -> Result<String> {
     let mut payload: BTreeMap<&'static str, Value> = BTreeMap::new();
 
-    payload.insert("certificate_id", cert.get("certificate_id").cloned().unwrap_or_default());
-    payload.insert("deployer_id", cert.get("deployer_id").cloned().unwrap_or_default());
+    payload.insert(
+        "certificate_id",
+        cert.get("certificate_id").cloned().unwrap_or_default(),
+    );
+    payload.insert(
+        "deployer_id",
+        cert.get("deployer_id").cloned().unwrap_or_default(),
+    );
     // deployer_name uses omitempty on the Go side; if absent, sign as empty string
-    payload.insert("deployer_name", cert.get("deployer_name").cloned().unwrap_or(json!("")));
+    payload.insert(
+        "deployer_name",
+        cert.get("deployer_name").cloned().unwrap_or(json!("")),
+    );
     payload.insert("score", cert.get("score").cloned().unwrap_or(json!(0)));
-    payload.insert("score_band", cert.get("score_band").cloned().unwrap_or_default());
+    payload.insert(
+        "score_band",
+        cert.get("score_band").cloned().unwrap_or_default(),
+    );
     payload.insert(
         "subscore_governance",
         cert.pointer("/subscores/governance_discipline/value")
@@ -135,13 +167,34 @@ fn build_signable_canonical_json(cert: &Value) -> Result<String> {
             .cloned()
             .unwrap_or(json!(0)),
     );
-    payload.insert("methodology_version", cert.get("methodology_version").cloned().unwrap_or_default());
-    payload.insert("aarm_version", cert.get("aarm_version").cloned().unwrap_or_default());
-    payload.insert("aarm_conformance", cert.get("aarm_conformance").cloned().unwrap_or_default());
-    payload.insert("evidence_url", cert.get("evidence_url").cloned().unwrap_or_default());
-    payload.insert("issued_at", cert.get("issued_at").cloned().unwrap_or_default());
-    payload.insert("valid_until", cert.get("valid_until").cloned().unwrap_or_default());
-    payload.insert("public_key_id", cert.get("public_key_id").cloned().unwrap_or_default());
+    payload.insert(
+        "methodology_version",
+        cert.get("methodology_version").cloned().unwrap_or_default(),
+    );
+    payload.insert(
+        "aarm_version",
+        cert.get("aarm_version").cloned().unwrap_or_default(),
+    );
+    payload.insert(
+        "aarm_conformance",
+        cert.get("aarm_conformance").cloned().unwrap_or_default(),
+    );
+    payload.insert(
+        "evidence_url",
+        cert.get("evidence_url").cloned().unwrap_or_default(),
+    );
+    payload.insert(
+        "issued_at",
+        cert.get("issued_at").cloned().unwrap_or_default(),
+    );
+    payload.insert(
+        "valid_until",
+        cert.get("valid_until").cloned().unwrap_or_default(),
+    );
+    payload.insert(
+        "public_key_id",
+        cert.get("public_key_id").cloned().unwrap_or_default(),
+    );
 
     // BTreeMap iterates in sorted-key order; serde_json::to_string produces
     // compact JSON (no whitespace). This matches Go's canonicalJSON in
@@ -190,7 +243,10 @@ async fn fetch_pubkey_from_jwks(jwks_url: &str, kid: &str) -> Result<VerifyingKe
     if !status.is_success() {
         return Err(anyhow!("JWKS fetch returned {}", status));
     }
-    let jwks: Value = resp.json().await.context("JWKS response is not valid JSON")?;
+    let jwks: Value = resp
+        .json()
+        .await
+        .context("JWKS response is not valid JSON")?;
 
     let keys = jwks
         .get("keys")
@@ -200,7 +256,12 @@ async fn fetch_pubkey_from_jwks(jwks_url: &str, kid: &str) -> Result<VerifyingKe
     let matching = keys
         .iter()
         .find(|k| k.get("kid").and_then(|v| v.as_str()) == Some(kid))
-        .ok_or_else(|| anyhow!("no JWK matches kid={} (cert may reference a key the issuer rotated out)", kid))?;
+        .ok_or_else(|| {
+            anyhow!(
+                "no JWK matches kid={} (cert may reference a key the issuer rotated out)",
+                kid
+            )
+        })?;
 
     let alg = matching.get("alg").and_then(|v| v.as_str()).unwrap_or("");
     let crv = matching.get("crv").and_then(|v| v.as_str()).unwrap_or("");

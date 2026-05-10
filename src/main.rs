@@ -279,7 +279,9 @@ async fn main() -> Result<()> {
             cert_path,
             jwks_url,
             pubkey_file,
-        } => verify_cert::cmd_verify_certificate(&cert_path, &jwks_url, pubkey_file.as_ref()).await?,
+        } => {
+            verify_cert::cmd_verify_certificate(&cert_path, &jwks_url, pubkey_file.as_ref()).await?
+        }
         Commands::Bench {
             upstream_cmd,
             upstream_args,

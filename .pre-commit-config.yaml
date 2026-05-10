@@ -1,0 +1,45 @@
+# pre-commit config — runs the same checks as CI, locally, before commit/push.
+# Install with: pre-commit install && pre-commit install --hook-type pre-push
+# Bypass in emergencies: git commit --no-verify / git push --no-verify
+# Update hook versions: pre-commit autoupdate
+#
+# Stage split:
+#   pre-commit (every commit, must be fast):  cargo fmt --check
+#   pre-push   (every push, can be slower):   cargo clippy + cargo test
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
+        args: [--maxkb=500]
+
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt --check
+        entry: cargo fmt --check
+        language: system
+        types: [rust]
+        pass_filenames: false
+
+      - id: cargo-clippy
+        name: cargo clippy --all-targets -- -D warnings
+        entry: cargo clippy --all-targets -- -D warnings
+        language: system
+        types: [rust]
+        pass_filenames: false
+        stages: [pre-push]
+
+      - id: cargo-test
+        name: cargo test
+        entry: cargo test --quiet
+        language: system
+        types: [rust]
+        pass_filenames: false
+        stages: [pre-push]
