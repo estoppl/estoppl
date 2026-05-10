@@ -24,13 +24,19 @@ One config change. Zero code modifications. Your agent doesn't know it's there.
 
 ## Why this matters
 
-MCP tool calls are the new attack surface. AI agents autonomously call APIs, execute code, and move money — and most teams have zero visibility into what's happening.
+MCP tool calls are the new attack surface. AI agents autonomously call APIs, execute code, and move money — and most teams have zero visibility into what's happening. Worse: when the platform vendor itself ships a vulnerability, you can't always count on a patch.
+
+> **April 2026 — Anthropic discloses an MCP STDIO design flaw affecting ~200,000 servers.**
+> The official SDKs (Python, TypeScript, Java, Rust) execute arbitrary OS commands before validating they are an MCP server. Anthropic [declined to patch](https://www.theregister.com/2026/04/16/anthropic_mcp_design_flaw/) — labeled the behavior "expected" and updated security guidance instead.
+>
+> **Lesson:** vendor-issued security guidance is not a control. An independent trust layer is.
 
 Real attack vectors estoppl helps defend against:
 
-- **[Tool Poisoning](https://invariantlabs.ai/blog/mcp-security-notification-tool-poisoning-attacks)** — malicious instructions hidden in tool metadata cause agents to exfiltrate data or execute unauthorized actions. [MCPTox research](https://arxiv.org/abs/2508.14925) shows attack success rates exceeding 60% across 20 major LLM agents.
+- **Tool Poisoning** — malicious instructions hidden in tool metadata. [MCPTox research](https://arxiv.org/abs/2508.14925) shows attack success rates exceeding 60% across 20 major LLM agents. [Invariant Labs background](https://invariantlabs.ai/blog/mcp-security-notification-tool-poisoning-attacks).
+- **MCP supply-chain compromise** — `postmark-mcp` (Sept 2025) was the first in-the-wild malicious MCP server, BCC'ing every outbound email to an attacker-controlled inbox via an npm update. [Koi Security analysis](https://www.koi.ai/blog/postmark-mcp-npm-malicious-backdoor-email-theft).
+- **Critical MCP-ecosystem CVEs** — including [CVE-2026-40933 in Flowise (CVSS 10.0)](https://www.ox.security/blog/mcp-supply-chain-advisory-rce-vulnerabilities-across-the-ai-ecosystem/) and CVE-2025-49596 in MCP Inspector (CVSS 9.4 pre-auth RCE).
 - **[Prompt Injection via MCP](https://unit42.paloaltonetworks.com/model-context-protocol-attack-vectors/)** — attackers embed instructions in user-supplied input that trigger automated tool calls. In 2025, this led to [real data exfiltration through Supabase's Cursor agent](https://datasciencedojo.com/blog/mcp-security-risks-and-challenges/).
-- **[Command Injection (CVE-2025-6514)](https://www.practical-devsecops.com/mcp-security-vulnerabilities/)** — malicious MCP servers achieving remote code execution on client machines, affecting 437,000+ installs.
 - **Runaway agents** — an agent in a loop calling Stripe 200 times, or making a $500k wire transfer because the prompt was ambiguous.
 - **LLM tool substitution** — when a tool is blocked, the LLM autonomously finds an alternative tool that returns the same data. We observed this in testing: blocking `list_customers` caused Claude to use `search_stripe_resources` instead, bypassing the block in seconds. The audit trail catches both calls — without estoppl, the workaround is invisible.
 
