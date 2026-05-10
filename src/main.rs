@@ -8,6 +8,7 @@ mod proxy;
 mod report;
 mod review;
 mod sync;
+mod verify_cert;
 mod wrap;
 
 use anyhow::{Context, Result};
@@ -178,6 +179,21 @@ enum Commands {
         config: PathBuf,
     },
 
+    /// Verify a Standing Certificate JSON file (offline once the public key is cached).
+    VerifyCertificate {
+        /// Path to the certificate JSON file.
+        cert_path: PathBuf,
+
+        /// JWKS URL to fetch the public key from. Default = production cloud.
+        #[arg(long, default_value = "https://api.estoppl.ai/.well-known/jwks.json")]
+        jwks_url: String,
+
+        /// Public key file (offline mode — overrides JWKS fetch).
+        /// Accepts hex-encoded, base64, base64url, or raw 32-byte file.
+        #[arg(long)]
+        pubkey_file: Option<PathBuf>,
+    },
+
     /// Measure proxy overhead — proves latency impact is negligible.
     Bench {
         /// Command to launch the upstream MCP server.
@@ -259,6 +275,11 @@ async fn main() -> Result<()> {
         } => wrap::run_wrap(dry_run, restore, client.as_deref())?,
         Commands::Unwrap { client } => wrap::run_wrap(false, true, client.as_deref())?,
         Commands::Dashboard { port, config } => cmd_dashboard(port, &config).await?,
+        Commands::VerifyCertificate {
+            cert_path,
+            jwks_url,
+            pubkey_file,
+        } => verify_cert::cmd_verify_certificate(&cert_path, &jwks_url, pubkey_file.as_ref()).await?,
         Commands::Bench {
             upstream_cmd,
             upstream_args,
