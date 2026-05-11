@@ -247,7 +247,7 @@ Sign up at [app.estoppl.ai](https://app.estoppl.ai) or reach out at [tina@estopp
 - [x] Cloud dashboard with real-time monitoring, policy editor, human review
 - [x] Blocking human review — tool calls pause until explicit approval
 - [x] Cloud verification API — upstream servers verify attestations via `GET /v1/verify/{id}`
-- [ ] Immutable WORM storage for regulated industries (SEC 17a-4, FINRA 3110)
+- [x] Immutable WORM storage for regulated industries (SEC 17a-4, FINRA 3110) — cloud archives every event-batch ingest to S3 Object Lock (Compliance mode, 7-year retention)
 - [ ] A2A protocol interception — audit agent-to-agent delegation chains
 - [ ] Agent credential issuance — Ed25519 credentials encoding identity + scope + provenance
 - [ ] Python/TypeScript SDK for non-MCP agent frameworks (LangChain, CrewAI)
